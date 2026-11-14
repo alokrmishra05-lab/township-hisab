@@ -1,0 +1,51 @@
+name: खर्च रजिस्टर APK बनाएँ
+
+on:
+  push:
+    branches: [app/kharch-register]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-kharch
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Capacitor Android प्रोजेक्ट
+        run: |
+          npm install
+          npx cap add android
+          npx cap sync android
+      - name: ऐप आइकन
+        run: |
+          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            for f in ic_launcher ic_launcher_round ic_launcher_foreground; do
+              p=android/app/src/main/res/mipmap-$d/$f.png
+              [ -f "$p" ] && cp site/icons/icon-192.png "$p"
+            done
+          done
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher*.xml
+      - name: APK बनाएँ
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../surya-kunj-kharch.apk
+      - name: रिलीज़ में डालें
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete kharch-latest --yes --cleanup-tag || true
+          gh release create kharch-latest surya-kunj-kharch.apk --target app/kharch-register --title "सूर्य कुंज खर्च रजिस्टर APK" --notes "खर्च रजिस्टर (https://surya-kunj-staging.pages.dev/expenses) का ऐप। फ़ोन में इंस्टॉल करने के लिए surya-kunj-kharch.apk डाउनलोड करें।"

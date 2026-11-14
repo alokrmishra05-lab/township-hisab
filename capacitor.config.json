@@ -1,9 +1,9 @@
 {
-  "appId": "com.alokrmishra.townshiphisab",
-  "appName": "सूर्य कुंज",
+  "appId": "com.alokrmishra.suryakunjkharch",
+  "appName": "सूर्य कुंज खर्च",
   "webDir": "site",
   "server": {
-    "url": "https://alokrmishra05-lab.github.io/township-hisab/",
+    "url": "https://surya-kunj-staging.pages.dev/expenses",
     "cleartext": false
   }
 }

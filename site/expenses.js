@@ -11,7 +11,7 @@
   const mime = new Set(['image/jpeg','image/png','image/webp','application/pdf','application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
   const allowedPayers = new Set(['गगन आचारी','अमरनाथ पाण्डेय','आलोक रंजन मिश्र','परियोजना फंड','साइट कैश']);
-  let db, user, member, busy = false;
+  let db, user, member, busy = false, editingId = null;
   const show = (message,type='') => {
     $('message').hidden = false;
     $('message').className = 'notice ' + type;
@@ -90,7 +90,8 @@
     const files=Array.from($('proof').files);
     let inserted=null;
     try{
-      validateFiles(files);
+      if(!editingId || $('proof').required) validateFiles(files);
+      else if(files.length) validateFiles(files);
       const amt=Number($('amount').value);
       if(!Number.isFinite(amt) || amt<=0 || amt>100000000)throw Error('सही राशि भरें।');
       if(!allowedPayers.has($('payer').value))throw Error('पैसे देने वाले का नाम चुनें।');
@@ -106,10 +107,18 @@
       };
       if(!fields.incurred_on || !fields.category || !fields.description)throw Error('आवश्यक विवरण भरें।');
       setBusy(true);
-      const {data,error:insertError}=await db.from('site_expenses')
-        .insert(fields).select('id').single();
-      if(insertError)throw insertError;
-      inserted=data.id;
+      if(editingId){
+        const {data,error:editError}=await db.from('site_expenses')
+          .update(fields).eq('id',editingId).eq('submitted_by',user.id)
+          .eq('status','pending').select('id').single();
+        if(editError)throw editError;
+        inserted=data.id;
+      }else{
+        const {data,error:insertError}=await db.from('site_expenses')
+          .insert(fields).select('id').single();
+        if(insertError)throw insertError;
+        inserted=data.id;
+      }
       let count=0;
       for(const file of files){
         const suffix=(file.name.split('.').pop()||'file').replace(/[^a-zA-Z0-9]/g,'').slice(0,10).toLowerCase();
@@ -125,8 +134,9 @@
         if(metaError)throw Error('फ़ाइल चढ़ गई, लेकिन रिकॉर्ड लिंक नहीं हुआ: '+error(metaError));
         count++;
       }
-      $('expenseForm').reset();$('date').value=localDate();
-      show('खर्च दर्ज हुआ। '+count+' प्रमाण फ़ाइलें सुरक्षित हुईं। अब व्यवस्थापक की मंज़ूरी बाकी है।','success');
+      $('expenseForm').reset();$('date').value=localDate();editingId=null;
+      $('submitBtn').textContent='खर्च समीक्षा के लिए भेजें';$('proof').required=true;
+      show('खर्च सुरक्षित हुआ। '+count+' नई प्रमाण फ़ाइलें जुड़ीं। मंज़ूरी अभी बाकी है।','success');
       await loadExpenses();
     }catch(e){
       show((inserted?'खर्च Pending में दर्ज हो गया है, लेकिन प्रमाण का अपलोड अधूरा है। व्यवस्थापक से एंट्री '+inserted+' की जाँच कराएँ। ':'')+error(e),'error');
@@ -158,6 +168,8 @@
       const ev=byExpense.get(r.id)||[];
       const badgeClass=r.status==='approved'?'ok':r.status==='rejected'?'no':'';
       const evidence=ev.length?ev.map(p=>'<button type="button" class="secondary proofBtn" data-path="'+esc(p.storage_path)+'">'+esc(p.original_filename)+'</button>').join(' '):'<small>प्रमाण संलग्न नहीं है</small>';
+      const edit=r.status==='pending' && r.submitted_by===user.id
+        ? '<button type="button" class="secondary editBtn" data-id="'+esc(r.id)+'">एंट्री सुधारें</button>' : '';
       const reviews=member.role==='admin' && r.status==='pending'
         ? '<div class="row" style="margin-top:10px"><button type="button" class="approveBtn" data-id="'+esc(r.id)+'" '+(!ev.length?'disabled title="प्रमाण आवश्यक"':'')+'>स्वीकृत करें</button><button type="button" class="secondary rejectBtn" data-id="'+esc(r.id)+'">अस्वीकृत करें</button></div>' : '';
       return '<div class="item"><div class="row" style="align-items:center"><span class="label-text">'+esc(r.category)+'</span><span class="amount">'+money(r.amount)+'</span></div>'+
@@ -166,8 +178,25 @@
         '<small>माध्यम: '+esc(r.payment_method)+(r.bill_no?' · बिल: '+esc(r.bill_no):'')+'</small>'+
         (r.note?'<small>टिप्पणी: '+esc(r.note)+'</small>':'')+
         (r.review_note?'<small>समीक्षा: '+esc(r.review_note)+'</small>':'')+
-        '<div class="row" style="margin-top:9px">'+evidence+'</div>'+reviews+'</div>';
+        '<div class="row" style="margin-top:9px">'+evidence+'</div>'+edit+reviews+'</div>';
     }).join('');
+    document.querySelectorAll('.editBtn').forEach(b=>b.addEventListener('click',()=>{
+      const r=records.find(r=>r.id===b.dataset.id);
+      if(!r || r.status!=='pending' || r.submitted_by!==user.id)return;
+      editingId=r.id;
+      $('date').value=r.incurred_on;
+      $('amount').value=r.amount;
+      $('category').value=r.category;
+      $('payer').value=r.paid_by;
+      $('method').value=r.payment_method;
+      $('bill').value=r.bill_no||'';
+      $('description').value=r.description;
+      $('note').value=r.note||'';
+      $('proof').required=!(byExpense.get(r.id)||[]).length;
+      $('proof').value='';
+      $('submitBtn').textContent='Pending खर्च में बदलाव सहेजें';
+      window.scrollTo({top:0,behavior:'smooth'});
+    }));
     document.querySelectorAll('.proofBtn').forEach(b=>b.addEventListener('click',async()=>{
       const path=b.dataset.path; b.disabled=true;
       try{

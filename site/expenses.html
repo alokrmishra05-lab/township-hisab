@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14532d">
 <meta name="referrer" content="no-referrer">
-<title>खर्च रजिस्टर | सूर्य कुंज आवासीय योजना</title>
+<title>सूर्य कुंज हिसाब-किताब</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -62,12 +62,19 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .sheet h3{margin:0 0 8px;font-size:18px}
 .pos{color:#1b7a3a}.neg{color:#b42318}
 #hisabBox table{width:100%;margin-top:6px}#hisabBox td:last-child{text-align:right}
+.brand{display:flex;align-items:center;gap:10px}.brand img{border-radius:12px}
+.brand b{display:block;font-size:18px;line-height:1.2}.brand small{color:var(--muted);font-size:13px}
+.boot{display:flex;align-items:center;justify-content:center;gap:10px;padding:40px 0;color:var(--muted)}
+.spin{width:22px;height:22px;border:3px solid var(--line,#ccc);border-top-color:currentColor;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
 </style>
 </head>
 <body>
 <main>
-<header><a href="./">← मुख्य हिसाब</a><button id="signOut" class="secondary" hidden>लॉगआउट</button></header>
-<h1>खर्च रजिस्टर</h1><div class="sub">सूर्य कुंज आवासीय योजना · सदस्यों के लिए निजी · मूल हिसाब और साझेदारों के निवेश पर असर नहीं</div>
+<header><div class="brand"><img src="icons/icon-192.png" alt="" width="44" height="44"><div><b>सूर्य कुंज</b><small>आवासीय योजना</small></div></div><button id="signOut" class="secondary" hidden>लॉगआउट</button></header>
+<h1>हिसाब-किताब</h1><div class="sub">निवेश और खर्च एक जगह · केवल सदस्यों के लिए</div>
+<div id="boot" class="boot" role="status"><span class="spin"></span>खुल रहा है…</div>
 <div id="setup" class="notice" hidden>यह सुविधा अभी चालू नहीं है। Admin को अलग Surya Kunj Supabase सेटअप पूरा करना है (EXPENSE-REGISTER.md)।</div>
 <div id="message" class="notice" hidden role="status" aria-live="polite"></div>
 

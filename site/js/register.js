@@ -62,7 +62,7 @@ const when = t => t ? new Date(t).toLocaleString('hi-IN', { timeZone: 'Asia/Kolk
 const validConfig = /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(cfg.url || '')
   && typeof cfg.anonKey === 'string' && cfg.anonKey.length > 40 && !/PASTE|YOUR/i.test(cfg.anonKey + cfg.url);
 if (!validConfig || !window.supabase?.createClient) {
-  $('setup').hidden = false;
+  $('setup').hidden = false; $('boot').hidden = true;
   if (validConfig) $('setup').textContent = 'ऑनलाइन सेवा लोड नहीं हुई। नेटवर्क जाँचकर पेज फिर खोलें।';
 } else {
   db = window.supabase.createClient(cfg.url, cfg.anonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
@@ -115,6 +115,9 @@ function init() {
 
 // हर बड़े कदम पर सदस्यता/अधिकार database से ताज़ा पढ़ें (Admin के बदलाव तुरंत लागू)
 async function refresh() {
+  try { return await refreshInner(); } finally { const b = $('boot'); if (b) b.hidden = true; }
+}
+async function refreshInner() {
   const { data: { user: u } } = await db.auth.getUser();
   user = u || null; me = null;
   $('signOut').hidden = !user; $('loginBox').hidden = !!user;
@@ -409,7 +412,8 @@ async function loadHisab() {
   if (error) { $('hisabBox').textContent = errText(error); return; }
   const P = v => { const t = String(v ?? '0').trim(), neg = t.startsWith('-'); const p = toPaise(neg ? t.slice(1) : t) ?? 0n; return neg ? -p : p; };
   const all = data.find(x => x.kind === 'all'), other = data.find(x => x.kind === 'other');
-  const partners = data.filter(x => x.kind === 'partner');
+  const ORDER = ['आलोक रंजन मिश्र', 'अमरनाथ पाण्डेय', 'गगन आचारी'], pos = n => { const i = ORDER.indexOf(n); return i < 0 ? 99 : i; };
+  const partners = data.filter(x => x.kind === 'partner').sort((a, b) => pos(a.name) - pos(b.name) || a.name.localeCompare(b.name));
   const sign = v => { const p = P(v); return p > 0n ? `<b class="pos">+${rupee(p)}</b> <small>लेना है</small>` : p < 0n ? `<b class="neg">−${rupee(-p)}</b> <small>देना है</small>` : '<b>बराबर</b>'; };
   $('hisabBox').innerHTML = `<div class="totals"><div><small>कुल (साझेदारों से)</small><b>${rupee(P(all?.total))}</b></div>
       <div><small>निवेश (भूमि खरीद)</small><b>${rupee(P(all?.invest))}</b></div><div><small>बाकी खर्च</small><b>${rupee(P(all?.spend))}</b></div></div>

@@ -4,85 +4,144 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14532d">
-<title>साइट खर्च | सूर्य कुंज</title>
+<meta name="referrer" content="no-referrer">
+<title>साइट खर्च | सूर्य कुंज आवासीय योजना</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{font-family:system-ui,"Noto Sans Devanagari",sans-serif;--ink:#202820;--green:#14532d;--bg:#f6f5f0;--muted:#697269}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink)}main{max-width:720px;margin:auto;padding:18px 14px 50px}
-header{display:flex;align-items:center;justify-content:space-between;gap:10px}a{color:var(--green)}
-h1{font-size:24px;margin:14px 0 4px}h2{font-size:18px;margin:0 0 13px}
-.sub{color:var(--muted);font-size:14px;margin-bottom:18px}
-.card{background:white;border:1px solid #e3e6df;border-radius:16px;padding:17px;margin:14px 0}
-label{font-size:13px;font-weight:650;display:block;margin:12px 0 5px}
-input,select,textarea{font:inherit;font-size:16px;width:100%;border:1px solid #ccd5c8;background:white;border-radius:10px;padding:11px;color:var(--ink)}
-textarea{min-height:74px;resize:vertical}input[type=file]{font-size:14px}
-button{font:inherit;font-weight:650;background:var(--green);border:0;color:white;border-radius:10px;padding:11px 15px;cursor:pointer}
-button:disabled{opacity:.55;cursor:wait}.secondary{background:#ebf3e9;color:var(--green)}
+:root{--bg:#f6f5f0;--card:#fff;--ink:#1c1f1a;--muted:#646b61;--line:#e3e5de;--brand:#14532d;--brand-soft:#e7f1ea;
+  --warn-bg:#fff4da;--warn-line:#efd497;--err-bg:#ffeded;--err-line:#f0b6b6;--ok-bg:#e7f7eb;--ok-line:#a7d6b4;--field:#fff;--field-line:#ccd5c8}
+@media (prefers-color-scheme:dark){:root{--bg:#111410;--card:#1a1e19;--ink:#eef0ea;--muted:#9aa093;--line:#2b3029;--brand:#4ade80;--brand-soft:#1d2b21;
+  --warn-bg:#3a2f12;--warn-line:#6b5420;--err-bg:#3b1717;--err-line:#7a2e2e;--ok-bg:#16301d;--ok-line:#2f6b3e;--field:#141813;--field-line:#394036}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans Devanagari",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+main{max-width:720px;margin:auto;padding:14px 14px 60px}
+header{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px}
+a{color:var(--brand)}
+h1{font-size:22px;margin:10px 0 2px}h2{font-size:17px;margin:0 0 12px}
+.sub{color:var(--muted);font-size:14px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0}
+label{font-size:13px;font-weight:600;display:block;margin:12px 0 5px}
+input,select,textarea{font:inherit;font-size:16px;width:100%;border:1px solid var(--field-line);background:var(--field);border-radius:10px;padding:11px;color:var(--ink);min-height:44px}
+textarea{min-height:72px;resize:vertical}input[type=file]{font-size:14px;padding:9px}
+button{font:inherit;font-weight:600;font-size:15px;background:var(--brand);border:0;color:#fff;border-radius:10px;padding:10px 15px;cursor:pointer;min-height:44px}
+@media (prefers-color-scheme:dark){button{color:#0b1a10}}
+button:disabled{opacity:.55;cursor:wait}
+.secondary{background:var(--brand-soft);color:var(--brand)!important}
+.danger{background:#b42318;color:#fff!important}
 .row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:140px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}@media(max-width:500px){.grid{grid-template-columns:1fr}}
-.badge{border-radius:7px;background:#fff3d1;color:#7c5200;padding:3px 8px;font-size:12px;font-weight:650;display:inline-block}
-.ok{background:#e4f5e7;color:#166534}.no{background:#fbe7e7;color:#a12727}
-.muted,small{color:var(--muted);font-size:13px}small{display:block;margin-top:5px}
-.item{border-top:1px solid #e6e8e2;padding:14px 0}.item:first-child{border-top:0;padding-top:0}
-.amount{font-size:18px;font-weight:800}.label-text{font-size:14px;font-weight:600}
-.notice{padding:12px;border-radius:12px;background:#fff4da;border:1px solid #efd497;margin:12px 0;font-size:14px;white-space:pre-wrap}
-.notice.error{background:#ffeded;border-color:#f0b6b6}.notice.success{background:#e7f7eb;border-color:#a7d6b4}
-[hidden]{display:none!important}hr{border:0;border-top:1px solid #e7e9e4;margin:14px 0}
-button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #ddaa28;outline-offset:2px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}@media(max-width:520px){.grid{grid-template-columns:1fr}}
+.badge{border-radius:7px;padding:2px 8px;font-size:12px;font-weight:600;display:inline-block;background:var(--warn-bg);border:1px solid var(--warn-line)}
+.b-ok{background:var(--ok-bg);border-color:var(--ok-line)}.b-no{background:var(--err-bg);border-color:var(--err-line)}
+.muted,small{color:var(--muted);font-size:13px}small{display:block;margin-top:4px}
+.item{border-top:1px solid var(--line);padding:14px 0}.item:first-child{border-top:0;padding-top:0}
+.amount{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums}
+.ref{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.notice{padding:12px;border-radius:12px;background:var(--warn-bg);border:1px solid var(--warn-line);margin:12px 0;font-size:14px;white-space:pre-wrap}
+.notice.error{background:var(--err-bg);border-color:var(--err-line)}.notice.success{background:var(--ok-bg);border-color:var(--ok-line)}
+[hidden]{display:none!important}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chip{font-size:13px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink)!important;min-height:36px}
+.totals{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0 4px}
+.totals div{background:var(--bg);border-radius:10px;padding:8px}.totals b{display:block;font-size:15px;font-variant-numeric:tabular-nums}
+.totals span{font-size:11px;color:var(--muted)}
+.audit{font-size:12px;color:var(--muted);margin-top:8px;border-left:2px solid var(--line);padding-left:8px}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #ddaa28;outline-offset:2px}
+/* मोबाइल-अनुकूल संवाद (prompt/confirm की जगह) */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;z-index:50;padding:0}
+.sheet{background:var(--card);color:var(--ink);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}
+@media(min-width:600px){.modal{align-items:center}.sheet{border-radius:18px}}
+.sheet h3{margin:0 0 8px;font-size:18px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px;margin:8px 0}
+.kv dt{color:var(--muted)}.kv dd{margin:0;font-weight:500}
+.check{display:flex;gap:8px;align-items:flex-start;font-weight:500;font-size:14px;margin-top:10px}
+.check input{width:auto;min-height:auto;margin-top:4px}
 </style>
 </head>
 <body>
 <main>
 <header><a href="./">← मुख्य हिसाब</a><button id="signOut" class="secondary" hidden>लॉगआउट</button></header>
-<h1>साइट खर्च</h1><div class="sub">सूर्य कुंज आवासीय योजना · खर्च का प्रमाण और अनुमोदन</div>
-<div id="setup" class="notice" hidden>यह सुविधा अभी कॉन्फ़िगर नहीं है। व्यवस्थापक को Supabase URL और Publishable/Anon Key जोड़नी होगी। <b>Service role key कभी यहाँ न डालें।</b></div>
+<h1>साइट खर्च</h1><div class="sub">सूर्य कुंज आवासीय योजना · प्रमाण सहित खर्च और दो-व्यक्ति स्वीकृति</div>
+<div id="setup" class="notice" hidden>यह सुविधा अभी चालू नहीं है। व्यवस्थापक को Supabase सेटअप पूरा करना है (SITE-EXPENSE-SETUP.md देखें)।</div>
 <div id="message" class="notice" hidden role="status" aria-live="polite"></div>
+
 <section id="loginBox" class="card" hidden>
-<h2>अधिकृत कर्मचारी / साझेदार लॉगिन</h2>
-<form id="loginForm">
-<label for="email">ईमेल</label><input id="email" type="email" autocomplete="username" required>
-<label for="password">व्यक्तिगत पासवर्ड</label><input id="password" type="password" autocomplete="current-password" required>
-<button type="submit" id="loginBtn" style="margin-top:14px">लॉगिन</button>
-</form>
-<small>मुख्य हिसाब का साझा पासवर्ड यहाँ काम नहीं करेगा। हर व्यक्ति का अलग अकाउंट जरूरी है।</small>
+  <h2>अधिकृत कर्मचारी / साझेदार लॉगिन</h2>
+  <form id="loginForm">
+    <label for="email">ईमेल</label><input id="email" type="email" autocomplete="username" required>
+    <label for="password">व्यक्तिगत पासवर्ड</label><input id="password" type="password" autocomplete="current-password" required>
+    <button type="submit" id="loginBtn" style="margin-top:14px;width:100%">लॉगिन</button>
+  </form>
+  <small>मुख्य हिसाब का साझा पासवर्ड यहाँ काम नहीं करेगा। हर व्यक्ति का अलग अकाउंट ज़रूरी है।</small>
 </section>
+
 <div id="workspace" hidden>
-<div class="card">
-<div id="identity" class="muted"></div>
-<h2 style="margin-top:13px">नया साइट खर्च जोड़ें</h2>
-<form id="expenseForm">
-<div class="grid">
-<div><label for="date">खर्च की तारीख *</label><input id="date" type="date" required></div>
-<div><label for="amount">राशि (₹) *</label><input id="amount" type="number" min="0.01" max="100000000" step="0.01" required></div>
-<div><label for="category">खर्च की श्रेणी *</label><select id="category" required>
-<option value="">चुनें…</option>
-<option>मिट्टी भराई</option><option>मज़दूरी</option><option>निर्माण सामग्री</option>
-<option>बिजली / पानी</option><option>मशीन / वाहन</option><option>ऑफिस</option>
-<option>फीस / सरकारी कार्य</option><option>साइट रखरखाव</option><option>अन्य साइट खर्च</option>
-</select></div>
-<div><label for="payer">पैसे किसने दिए? *</label><select id="payer" required>
-<option value="">चुनें…</option>
-<option>गगन आचारी</option><option>अमरनाथ पाण्डेय</option><option>आलोक रंजन मिश्र</option>
-<option>परियोजना फंड</option><option>साइट कैश</option>
-</select></div>
-<div><label for="method">भुगतान का माध्यम *</label><select id="method" required>
-<option value="">चुनें…</option><option>नकद</option><option>UPI</option><option>बैंक</option><option>अन्य</option>
-</select></div>
-<div><label for="bill">बिल / वाउचर नंबर</label><input id="bill" maxlength="120" placeholder="वैकल्पिक"></div>
-</div>
-<label for="description">खर्च किस काम पर हुआ? *</label><textarea id="description" required minlength="3" maxlength="1000" placeholder="जैसे: 10 हाइवा मिट्टी × ₹3,000"></textarea>
-<label for="note">अतिरिक्त टिप्पणी</label><textarea id="note" maxlength="1000" placeholder="वैकल्पिक"></textarea>
-<label for="proof">बिल / फोटो / PDF / Word दस्तावेज़ *</label>
-<input id="proof" type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.doc,.docx" multiple required>
-<small>अधिकतम 5 फ़ाइलें, प्रत्येक 10 MB तक। दस्तावेज़ निजी रहेंगे। एक बार अपलोड होने के बाद इन्हें बदलने की सुविधा नहीं है।</small>
-<button id="submitBtn" type="submit" style="margin-top:16px">खर्च समीक्षा के लिए भेजें</button>
-</form>
-</div>
-<div class="card"><div class="row" style="align-items:center"><h2 style="margin-bottom:0">साइट खर्च का रिकॉर्ड</h2><button class="secondary" id="refreshBtn">रिफ्रेश</button></div>
-<div id="totals" class="muted" style="margin:10px 0"></div><div id="entries" class="muted">लोड हो रहा है…</div>
-</div>
+  <div class="card">
+    <div id="identity" class="muted"></div>
+    <h2 style="margin-top:12px" id="formTitle">नया साइट खर्च जोड़ें</h2>
+    <form id="expenseForm" novalidate>
+      <div class="grid">
+        <div><label for="date">खर्च की तारीख *</label><input id="date" type="date" required></div>
+        <div><label for="amount">राशि (₹) *</label><input id="amount" type="number" inputmode="decimal" min="0.01" max="100000000" step="0.01" required></div>
+        <div><label for="category">खर्च की श्रेणी *</label><select id="category" required>
+          <option value="">चुनें…</option>
+          <option>मिट्टी भराई</option><option>मजदूरी</option><option>निर्माण सामग्री</option>
+          <option>बिजली / पानी</option><option>मशीन / वाहन</option><option>कार्यालय / यात्रा</option>
+          <option>लेआउट / स्वीकृति शुल्क</option><option>सड़क / प्लॉटिंग विकास</option>
+          <option>साइट रखरखाव</option><option>अन्य</option>
+        </select></div>
+        <div><label for="payerType">पैसा कहाँ से गया? *</label><select id="payerType" required>
+          <option value="">चुनें…</option>
+          <option value="partner">साझेदार ने अपनी जेब से</option>
+          <option value="site_cash">साइट कैश</option>
+          <option value="project_fund">परियोजना फंड</option>
+        </select></div>
+        <div id="partnerWrap" hidden><label for="partner">कौन से साझेदार? *</label><select id="partner">
+          <option value="">चुनें…</option>
+          <option>आलोक रंजन मिश्र</option><option>अमरनाथ पाण्डेय</option><option>गगन आचारी</option>
+        </select></div>
+        <div><label for="method">भुगतान का माध्यम *</label><select id="method" required>
+          <option value="">चुनें…</option><option>नकद</option><option>UPI</option><option>बैंक</option><option>चेक</option><option>अन्य</option>
+        </select></div>
+        <div><label for="bill">बिल / वाउचर नंबर</label><input id="bill" maxlength="120" placeholder="हो तो ज़रूर लिखें (दोहराव रोकता है)"></div>
+      </div>
+      <label for="description">खर्च किस काम पर हुआ? *</label>
+      <textarea id="description" required minlength="3" maxlength="1000" placeholder="जैसे: 10 हाइवा मिट्टी × ₹3,000"></textarea>
+      <label for="note">अतिरिक्त टिप्पणी</label><textarea id="note" maxlength="1000" placeholder="वैकल्पिक"></textarea>
+      <label for="proof" id="proofLabel">बिल / फोटो / PDF / Word (DOCX) *</label>
+      <input id="proof" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple>
+      <small>अधिकतम 5 फ़ाइलें, प्रत्येक 10 MB तक। JPG, PNG, WEBP, PDF, DOCX। फ़ाइलें निजी रहेंगी और server पर जाँची जाएँगी; अपलोड के बाद बदली/हटाई नहीं जा सकतीं।</small>
+      <div class="row" style="margin-top:16px">
+        <button id="submitBtn" type="submit">खर्च समीक्षा के लिए भेजें</button>
+        <button id="cancelEdit" type="button" class="secondary" hidden>सुधार रद्द करें</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="row" style="align-items:center"><h2 style="margin-bottom:0">साइट खर्च का रिकॉर्ड</h2>
+      <button class="secondary" id="refreshBtn" style="flex:0 0 auto">रिफ्रेश</button></div>
+    <div class="totals" id="totals"></div>
+    <small id="totalsNote"></small>
+    <div class="chips" id="filters"></div>
+    <div id="entries" class="muted" style="margin-top:12px">लोड हो रहा है…</div>
+    <button id="moreBtn" class="secondary" hidden style="width:100%;margin-top:10px">और एंट्री दिखाएँ</button>
+  </div>
 </div>
 </main>
+
+<div id="modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="sheet"><h3 id="modalTitle"></h3><div id="modalBody"></div>
+    <div class="row" style="margin-top:16px"><button id="modalOk" type="button"></button>
+      <button id="modalCancel" type="button" class="secondary">रद्द करें</button></div></div>
+</div>
+
 <script src="expenses-config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="expenses.js"></script>
-</body></html>
+<script src="vendor/supabase-js-2.119.0.umd.js"
+        integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
+<script type="module" src="js/expenses.js"></script>
+</body>
+</html>

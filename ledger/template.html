@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14532d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>सूर्य कुंज आवासीय योजना</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f6f5f0; --card:#ffffff; --ink:#1c1f1a; --muted:#6b7064; --line:#e6e4dc;
+    --brand:#14532d; --brand-soft:#e7f1ea; --pos:#15803d; --neg:#b42318; --accent:#b7791f;
+    --p0:#2563eb; --p1:#16a34a; --p2:#9333ea;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#111410; --card:#1a1e19; --ink:#eef0ea; --muted:#9aa093; --line:#2b3029;
+      --brand:#4ade80; --brand-soft:#1d2b21; --pos:#4ade80; --neg:#f87171; --accent:#fbbf24;
+      --p0:#60a5fa; --p1:#4ade80; --p2:#c084fc; }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Noto Sans Devanagari",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  .wrap{max-width:560px;margin:0 auto;padding:16px 16px 48px}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* Lock screen */
+  #lock{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+  .lockbox{width:100%;max-width:360px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:28px 22px;text-align:center}
+  .logo{width:56px;height:56px;border-radius:16px;background:var(--brand);margin:0 auto 14px;display:grid;place-items:center}
+  .logo svg{width:30px;height:30px}
+  .lockbox h1{font-size:20px;margin:0 0 4px}
+  .lockbox p{color:var(--muted);font-size:14px;margin:0 0 18px}
+  input[type=password],input[type=text]{width:100%;font:inherit;font-size:16px;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink);outline:none}
+  input:focus{border-color:var(--brand)}
+  .btn{width:100%;margin-top:12px;font:inherit;font-weight:600;font-size:16px;padding:12px;border:0;border-radius:12px;background:var(--brand);color:#fff;cursor:pointer}
+  @media (prefers-color-scheme: dark){ .btn{color:#0b1a10} }
+  .err{color:var(--neg);font-size:13px;min-height:18px;margin-top:10px}
+  label.rem{display:flex;gap:8px;align-items:center;justify-content:center;font-size:13px;color:var(--muted);margin-top:12px}
+
+  /* Header */
+  header{display:flex;align-items:center;justify-content:space-between;margin:4px 0 14px}
+  header h1{font-size:19px;margin:0}
+  header .sub{font-size:12px;color:var(--muted)}
+  .ghost{font:inherit;font-size:13px;background:none;border:1px solid var(--line);color:var(--muted);padding:6px 10px;border-radius:10px;cursor:pointer}
+
+  .hero{background:var(--brand);color:#fff;border-radius:20px;padding:18px 18px 16px;margin-bottom:14px}
+  @media (prefers-color-scheme: dark){ .hero{background:#14532d} }
+  .hero .lbl{font-size:13px;opacity:.85}
+  .hero .big{font-size:30px;font-weight:700;margin:2px 0 12px;letter-spacing:.2px}
+  .hero .row{display:flex;gap:10px}
+  .hero .pill{flex:1;background:rgba(255,255,255,.12);border-radius:12px;padding:8px 10px}
+  .hero .pill b{display:block;font-size:15px}
+  .hero .pill span{font-size:12px;opacity:.85}
+
+  .tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:4px;margin-bottom:14px;position:sticky;top:6px;z-index:5}
+  .tabs button{flex:1;font:inherit;font-size:14px;font-weight:600;padding:9px 6px;border:0;border-radius:10px;background:none;color:var(--muted);cursor:pointer}
+  .tabs button.on{background:var(--brand-soft);color:var(--brand)}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:12px}
+  .ptop{display:flex;align-items:center;gap:10px}
+  .dot{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:15px;flex:none}
+  .pname{font-weight:600;font-size:16px}
+  .pshare{font-size:12px;color:var(--muted)}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+  .grid3 div{background:var(--bg);border-radius:10px;padding:8px}
+  .grid3 span{display:block;font-size:11px;color:var(--muted)}
+  .grid3 b{font-size:14px}
+  .bal{margin-top:10px;display:flex;justify-content:space-between;align-items:center;font-size:14px;padding-top:10px;border-top:1px dashed var(--line)}
+  .bal b{font-size:16px}
+  .pos{color:var(--pos)} .neg{color:var(--neg)}
+  .bar{height:8px;border-radius:6px;background:var(--bg);overflow:hidden;margin-top:10px}
+  .bar i{display:block;height:100%;border-radius:6px}
+
+  h2{font-size:15px;margin:18px 2px 10px;color:var(--muted);font-weight:600}
+  .cat{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:14px}
+  .catrow{padding:10px 0;border-bottom:1px solid var(--line)}
+  .catrow:last-child{border-bottom:0}
+  .catbar{height:6px;border-radius:4px;background:var(--bg);margin-top:6px;overflow:hidden}
+  .catbar i{display:block;height:100%;background:var(--accent);border-radius:4px}
+
+  .filters{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:10px;scrollbar-width:none}
+  .chip{flex:none;font:inherit;font-size:13px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+  .chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  @media (prefers-color-scheme: dark){ .chip.on{color:#0b1a10} }
+  .tx{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+  .tx:last-child{border-bottom:0}
+  .tx .l{flex:1;min-width:0}
+  .tx .d{font-weight:500;font-size:14px}
+  .tx .m{font-size:12px;color:var(--muted);margin-top:2px}
+  .tx .r{text-align:right;flex:none}
+  .tx .a{font-weight:700;font-size:15px}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:6px;margin-top:4px}
+  .t-inv{background:#dbeafe;color:#1e40af} .t-exp{background:#ffedd5;color:#9a3412}
+  @media (prefers-color-scheme: dark){ .t-inv{background:#1e3a8a;color:#dbeafe} .t-exp{background:#7c2d12;color:#ffedd5} }
+  .foot{font-size:12px;color:var(--muted);text-align:center;margin-top:18px;line-height:1.6}
+  .hidden{display:none !important}
+  .note{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5}
+</style>
+</head>
+<body>
+
+<div id="lock">
+  <form class="lockbox" id="lockForm">
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V10l7-5 7 5v11"/><path d="M9 21v-6h6v6"/></svg></div>
+    <h1>सूर्य कुंज आवासीय योजना</h1>
+    <p>तीनों साझेदारों का निवेश व खर्च</p>
+    <input type="password" id="pw" placeholder="पासवर्ड डालें" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <label class="rem"><input type="checkbox" id="remember" checked> इस फ़ोन पर याद रखें</label>
+    <button class="btn" type="submit" id="unlockBtn">खोलें</button>
+    <div class="err" id="err"></div>
+    <div style="margin-top:12px;font-size:13px"><a href="./expenses.html" style="color:var(--brand)">साइट खर्च जोड़ें · कर्मचारी / साझेदार लॉगिन</a></div>
+  </form>
+</div>
+
+<div id="app" class="hidden">
+  <div class="wrap">
+    <header>
+      <div><h1 id="pTitle">सूर्य कुंज आवासीय योजना</h1><div class="sub" id="upd"></div></div>
+      <button class="ghost" id="logout">लॉक करें</button>
+    </header>
+
+    <div class="hero">
+      <div class="lbl">कुल लगाई गई राशि</div>
+      <div class="big num" id="tTotal"></div>
+      <div class="row">
+        <div class="pill"><span>निवेश (भूमि)</span><b class="num" id="tInv"></b></div>
+        <div class="pill"><span>खर्च</span><b class="num" id="tExp"></b></div>
+      </div>
+    </div>
+
+    <nav class="tabs">
+      <button data-v="partners" class="on">साझेदार</button>
+      <button data-v="cats">श्रेणीवार</button>
+      <button data-v="list">लेनदेन</button>
+    </nav>
+
+    <section id="v-partners"></section>
+    <section id="v-cats" class="hidden"><div class="card" id="catCard"></div></section>
+    <section id="v-list" class="hidden">
+      <div class="filters" id="filters"></div>
+      <div class="card" id="txCard"></div>
+    </section>
+
+    <div class="card" style="text-align:center"><a href="./expenses.html" style="color:var(--brand);font-weight:700">＋ साइट खर्च जोड़ें / प्रमाण देखें</a><div class="note">अलग लॉगिन · समीक्षा और स्वीकृति के बाद खर्च का रिकॉर्ड · मूल हिसाब पर असर नहीं</div></div>
+    <div class="foot">केवल देखने के लिए · नई एंट्री आलोक रंजन मिश्र द्वारा जोड़ी जाती है</div>
+  </div>
+</div>
+
+<script>
+const BLOB = __BLOB__;
+const COLORS = ['var(--p0)','var(--p1)','var(--p2)'];
+const fmt = n => '₹' + Math.round(n).toLocaleString('en-IN');
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const MONTHS = ['जनवरी','फरवरी','मार्च','अप्रैल','मई','जून','जुलाई','अगस्त','सितंबर','अक्टूबर','नवंबर','दिसंबर'];
+const fdate = d => { if(!d) return 'तिथि नहीं'; const [y,m,dd] = d.split('-'); return `${+dd} ${MONTHS[+m-1]} ${y}`; };
+
+async function decrypt(pw){
+  const enc = new TextEncoder();
+  const key0 = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey(
+    {name:'PBKDF2', salt:b64(BLOB.salt), iterations:BLOB.iter, hash:'SHA-256'},
+    key0, {name:'AES-GCM', length:256}, false, ['decrypt']);
+  const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64(BLOB.iv)}, key, b64(BLOB.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+function store(k,v){ try{ v===null ? localStorage.removeItem(k) : localStorage.setItem(k,v); }catch(e){} }
+function load(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+
+let DATA = null, filter = 'सभी';
+
+function render(){
+  const D = DATA, E = D.entries;
+  document.getElementById('pTitle').textContent = D.project;
+  document.getElementById('upd').textContent = 'अंतिम अपडेट: ' + D.updated;
+  const total = E.reduce((s,e)=>s+e.amt,0);
+  const inv = E.filter(e=>e.type==='निवेश').reduce((s,e)=>s+e.amt,0);
+  document.getElementById('tTotal').textContent = fmt(total);
+  document.getElementById('tInv').textContent = fmt(inv);
+  document.getElementById('tExp').textContent = fmt(total-inv);
+
+  // Partners
+  const maxC = Math.max(1, ...D.partners.map(p=>E.filter(e=>e.by===p.name).reduce((s,e)=>s+e.amt,0)));
+  document.getElementById('v-partners').innerHTML = D.partners.map((p,i)=>{
+    const mine = E.filter(e=>e.by===p.name);
+    const pi = mine.filter(e=>e.type==='निवेश').reduce((s,e)=>s+e.amt,0);
+    const pe = mine.filter(e=>e.type==='खर्च').reduce((s,e)=>s+e.amt,0);
+    const due = total*p.share, diff = pi+pe-due;
+    const cls = Math.round(diff)===0 ? '' : diff>0 ? 'pos' : 'neg';
+    const txt = Math.round(diff)===0 ? 'बराबर' : diff>0 ? 'लेना है' : 'देना है';
+    return `<div class="card">
+      <div class="ptop"><div class="dot" style="background:${COLORS[i%3]}">${esc(p.name[0])}</div>
+        <div><div class="pname">${esc(p.name)}</div><div class="pshare">हिस्सा ${(p.share*100).toFixed(2)}% · ${mine.length} एंट्री</div></div></div>
+      <div class="grid3">
+        <div><span>निवेश</span><b class="num">${fmt(pi)}</b></div>
+        <div><span>खर्च</span><b class="num">${fmt(pe)}</b></div>
+        <div><span>कुल योगदान</span><b class="num">${fmt(pi+pe)}</b></div>
+      </div>
+      <div class="bar"><i style="width:${((pi+pe)/maxC*100).toFixed(1)}%;background:${COLORS[i%3]}"></i></div>
+      <div class="bal"><span>हिस्से (${fmt(due)}) से अंतर</span><b class="num ${cls}">${diff>0?'+':diff<0?'−':''}${fmt(Math.abs(diff))} <small style="font-weight:500;font-size:12px">${txt}</small></b></div>
+    </div>`;
+  }).join('') + `<div class="note">"अंतर" = साझेदार का कुल योगदान − कुल राशि में उसका तय हिस्सा। + वाले को बाकी साझेदारों से लेना है, − वाले को देना है।</div>`;
+
+  // Categories
+  const cats = {};
+  E.forEach(e=>{ cats[e.cat] = (cats[e.cat]||0) + e.amt; });
+  const sorted = Object.entries(cats).sort((a,b)=>b[1]-a[1]);
+  const maxCat = sorted.length ? sorted[0][1] : 1;
+  document.getElementById('catCard').innerHTML = sorted.map(([c,v])=>`
+    <div class="catrow"><div class="cat"><span>${esc(c)}</span><b class="num">${fmt(v)}</b></div>
+    <div class="catbar"><i style="width:${(v/maxCat*100).toFixed(1)}%"></i></div></div>`).join('');
+
+  // Filters + list
+  const opts = ['सभी', ...D.partners.map(p=>p.name), 'निवेश', 'खर्च'];
+  document.getElementById('filters').innerHTML = opts.map(o=>`<button class="chip ${o===filter?'on':''}" data-f="${esc(o)}">${esc(o)}</button>`).join('');
+  const list = E.map((e,i)=>({...e,i})).filter(e=> filter==='सभी' || e.by===filter || e.type===filter)
+    .sort((a,b)=> (b.date||'').localeCompare(a.date||'') || b.i-a.i);
+  const sum = list.reduce((s,e)=>s+e.amt,0);
+  document.getElementById('txCard').innerHTML =
+    `<div class="cat" style="padding-bottom:8px;border-bottom:1px solid var(--line)"><span>${list.length} एंट्री</span><b class="num">${fmt(sum)}</b></div>` +
+    list.map(e=>`<div class="tx"><div class="l"><div class="d">${esc(e.desc)}</div>
+      <div class="m">${esc(e.by)} · ${fdate(e.date)}${e.mode?' · '+esc(e.mode):''}</div>
+      <div class="m">${esc(e.cat)}${e.note?' · '+esc(e.note):''}</div></div>
+      <div class="r"><div class="a num">${fmt(e.amt)}</div><span class="tag ${e.type==='निवेश'?'t-inv':'t-exp'}">${esc(e.type)}</span></div></div>`).join('');
+  document.querySelectorAll('#filters .chip').forEach(b=>b.onclick=()=>{ filter=b.dataset.f; render(); });
+}
+
+async function unlock(pw, remember){
+  const btn = document.getElementById('unlockBtn'), err = document.getElementById('err');
+  btn.disabled = true; btn.textContent = 'खुल रहा है…'; err.textContent='';
+  try{
+    DATA = await decrypt(pw);
+    if(remember) store('ts_pw', pw);
+    document.getElementById('lock').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    render();
+  }catch(e){
+    err.textContent = 'पासवर्ड गलत है';
+    store('ts_pw', null);
+  }finally{ btn.disabled=false; btn.textContent='खोलें'; }
+}
+
+document.getElementById('lockForm').addEventListener('submit', e=>{
+  e.preventDefault();
+  const pw = document.getElementById('pw').value.trim();
+  if(pw) unlock(pw, document.getElementById('remember').checked);
+});
+document.getElementById('logout').onclick = ()=>{
+  store('ts_pw', null); DATA=null;
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('lock').classList.remove('hidden');
+  document.getElementById('pw').value='';
+};
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on', x===b));
+  ['partners','cats','list'].forEach(v=>document.getElementById('v-'+v).classList.toggle('hidden', v!==b.dataset.v));
+  window.scrollTo({top:0});
+});
+const saved = load('ts_pw'); if(saved) unlock(saved, true);
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>

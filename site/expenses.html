@@ -72,12 +72,17 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 <section id="loginBox" class="card" hidden>
   <h2 id="authTitle">सदस्य लॉगिन</h2>
   <form id="authForm">
-    <label for="email">ईमेल</label><input id="email" type="email" autocomplete="username" required>
-    <label for="password">पासवर्ड</label><input id="password" type="password" autocomplete="current-password" minlength="10" required>
+    <label for="email">यूज़र आईडी</label><input id="email" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required placeholder="जैसे amarnath">
+    <label for="password">पासवर्ड</label><input id="password" type="password" autocomplete="current-password" minlength="6" required>
     <button type="submit" id="authBtn" style="margin-top:14px;width:100%">लॉगिन</button>
   </form>
-  <button type="button" id="toggleAuth" class="secondary" style="margin-top:10px;width:100%">नया हूँ — अकाउंट बनाऊँ</button>
-  <small>अकाउंट बनने के बाद Admin की मंज़ूरी तक रजिस्टर नहीं खुलेगा। मुख्य हिसाब का साझा पासवर्ड यहाँ काम नहीं करेगा।</small>
+  <button type="button" id="forgotBtn" class="secondary" style="margin-top:10px;width:100%">पासवर्ड भूल गए? Admin से नया पासवर्ड माँगें</button>
+  <form id="forgotForm" hidden style="margin-top:10px">
+    <label for="forgotId">आपकी यूज़र आईडी *</label><input id="forgotId" autocapitalize="none" spellcheck="false" maxlength="120" required>
+    <label for="forgotNote">संदेश (वैकल्पिक, जैसे आपका नाम)</label><input id="forgotNote" maxlength="200">
+    <button type="submit" id="forgotSend" style="margin-top:12px;width:100%">अनुरोध Admin को भेजें</button>
+  </form>
+  <small>खाता Admin बनाता है और यूज़र आईडी व पासवर्ड आपको बताता है। मुख्य हिसाब का साझा पासवर्ड यहाँ काम नहीं करेगा।</small>
 </section>
 
 <section id="joinBox" class="card" hidden>
@@ -142,6 +147,23 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   </section>
 
   <section id="v-members" hidden>
+    <div class="card"><h2>नया सदस्य बनाएँ</h2>
+      <form id="newMember">
+        <div class="grid">
+          <div><label for="nmName">नाम *</label><input id="nmName" maxlength="100" required></div>
+          <div><label for="nmLogin">यूज़र आईडी * <small>(अंग्रेज़ी छोटे अक्षर/अंक)</small></label><input id="nmLogin" maxlength="40" autocapitalize="none" spellcheck="false" required placeholder="जैसे amarnath"></div>
+          <div><label for="nmRole">भूमिका *</label><select id="nmRole">
+            <option value="partner">साझेदार — Read + Write</option>
+            <option value="assistant">सहायक — केवल Write</option>
+            <option value="reader">केवल Read</option></select></div>
+          <div><label for="nmPin">पासवर्ड (6 अंक) *</label><div class="row"><input id="nmPin" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" required style="flex:2">
+            <button type="button" id="nmGen" class="secondary" style="flex:1">बनाएँ</button></div></div>
+        </div>
+        <button type="submit" id="nmBtn" style="margin-top:12px;width:100%">सदस्य बनाएँ</button>
+      </form>
+      <small>सुधार (edit) अधिकार केवल Admin के पास रहता है। यूज़र आईडी और पासवर्ड सदस्य को स्वयं बताएँ।</small>
+    </div>
+    <div class="card"><h2>पासवर्ड-रीसेट अनुरोध</h2><div id="resetList" class="muted"></div></div>
     <div class="card"><h2>जुड़ने के अनुरोध (Pending)</h2><div id="pendingList" class="muted"></div></div>
     <div class="card"><h2>सक्रिय सदस्य और अधिकार</h2>
       <div class="notice" style="margin-top:4px"><b>अधिकारों का दायरा</b>

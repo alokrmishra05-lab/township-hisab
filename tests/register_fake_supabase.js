@@ -92,6 +92,12 @@
     sk_release_receipt_slot: a => { const s = (S.slots || []).find(x => x.storage_path === a.p_storage_path && x.status === 'reserved');
       if (!s) return err('खुला आरक्षण नहीं मिला'); if (s.uploaded) return err('फ़ाइल चढ़ चुकी है'); s.status = 'released'; return { data: null, error: null }; },
     sk_my_open_slots: () => ({ data: (S.slots || []).filter(s => s.status === 'reserved').map(s => ({ ...s, ref_no: (S.sk_expenses.find(e => e.id === s.expense_id) || {}).ref_no })), error: null }),
+    sk_request_password_reset: a => { (S.resets = S.resets || []);
+      if (!/^[a-z0-9][a-z0-9._+@-]{2,119}$/.test(String(a.p_login || '').trim().toLowerCase())) return err('यूज़र आईडी सही लिखें');
+      S.resets.push({ id: S.resets.length + 1, login: a.p_login.trim().toLowerCase(), note: a.p_note, status: 'open', requested_at: now() }); return { data: null, error: null }; },
+    sk_admin_reset_requests: () => { if (!admin()) return err('केवल Admin');
+      return { data: (S.resets || []).filter(r => r.status === 'open').map(r => ({ ...r, member_user: r.login === 'writer' ? 'u-writer' : null, member_name: r.login === 'writer' ? 'लेखक (परीक्षण)' : null, member_status: r.login === 'writer' ? 'active' : null, member_is_admin: false })), error: null }; },
+    sk_admin_close_reset: a => { if (!admin()) return err('केवल Admin'); const r = (S.resets || []).find(x => x.id === a.p_id && x.status === 'open'); if (!r) return err('यह अनुरोध खुला नहीं है'); r.status = a.p_status; return { data: null, error: null }; },
     sk_attach_receipt: a => { const sl = (S.slots || []).find(x => x.storage_path === a.p_storage_path && x.status === 'reserved');
       if (!sl) return err('इस फ़ाइल का वैध आरक्षण नहीं'); if (window.__FAIL_ATTACH) return err('नेटवर्क टूटा (परीक्षण)'); sl.status = 'attached';
       const r = { id: 'r' + (S.sk_receipts.length + 1), expense_id: a.p_expense_id, storage_path: a.p_storage_path, original_filename: a.p_original_filename, verification_status: 'pending', uploaded_by: me, created_at: now() };
@@ -99,7 +105,7 @@
   };
   window.supabase = { createClient: () => ({
     auth: { getUser: async () => ({ data: { user: window.__WHO === 'loggedout' ? null : { id: me } } }),
-      signInWithPassword: async () => ({ error: null }), signUp: async () => ({ data: { session: null }, error: null }), signOut: async () => ({ error: null }) },
+      signInWithPassword: async c => { calls.push(['signin', c.email]); return { error: null }; }, signUp: async () => ({ data: { session: null }, error: null }), signOut: async () => ({ error: null }) },
     from,
     rpc: async (n, a = {}) => { calls.push(['rpc', n, a]); return rpc[n] ? rpc[n](a) : err('unknown rpc'); },
     storage: { from: () => ({
@@ -110,6 +116,8 @@
       remove: async paths => { calls.push(['remove', paths]); paths.forEach(p => { const sl = (S.slots || []).find(x => x.storage_path === p && x.status === 'reserved'); if (sl) sl.uploaded = false; }); return { error: null }; },
       createSignedUrl: async () => ({ data: { signedUrl: 'about:blank' }, error: null }),
     }) },
-    functions: { invoke: async (n, o) => { calls.push(['invoke', n, o.body]); return { data: { status: 'verified' }, error: null }; } },
+    functions: { invoke: async (n, o) => { calls.push(['invoke', n, o.body]);
+      if (n === 'sk-admin-users' && o.body.action === 'set_password' && o.body.request_id) { const r = (S.resets || []).find(x => x.id === o.body.request_id); if (r) r.status = 'done'; }
+      return { data: n === 'sk-admin-users' ? { ok: true } : { status: 'verified' }, error: null }; } },
   }) };
 })();

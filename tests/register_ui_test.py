@@ -205,6 +205,43 @@ with sync_playwright() as p:
     m = [x for x in pg.evaluate('window.__STATE.sk_members') if x['user_id'] == 'u-rd'][0]
     check('पुष्टि के बाद अधिकार सहेजे गए (Read+सुधार)', m['can_read'] and m['can_correct'])
 
+    # लॉगिन: यूज़र आईडी → अस्थायी ईमेल; पासवर्ड भूलने पर Admin से अनुरोध
+    pg, errs = open_as(p, 'loggedout')
+    check('लॉगिन फ़ॉर्म "यूज़र आईडी" माँगता है, signup बटन नहीं', 'यूज़र आईडी' in pg.inner_text('#loginBox') and pg.locator('#toggleAuth').count() == 0)
+    pg.fill('#email', 'Amarnath'); pg.fill('#password', '123456'); pg.click('#authBtn'); pg.wait_for_timeout(400)
+    si = [c for c in pg.evaluate('window.__calls') if c[0] == 'signin']
+    check('यूज़र आईडी "Amarnath" → amarnath@suryakunj.example.com से लॉगिन (6 अंकों का पासवर्ड स्वीकार)', si and si[0][1] == 'amarnath@suryakunj.example.com', str(si))
+    pg, errs = open_as(p, 'loggedout')
+    pg.click('#forgotBtn'); pg.fill('#forgotId', 'writer'); pg.fill('#forgotNote', 'लेखक'); pg.click('#forgotSend'); pg.wait_for_timeout(400)
+    rs = state_of(pg).get('resets', [])
+    check('"पासवर्ड भूल गए" → Admin को अनुरोध दर्ज, सफलता संदेश', len(rs) == 1 and rs[0]['login'] == 'writer' and 'Admin' in pg.inner_text('#message'), str(rs))
+    check('लॉगिन/रीसेट पेज में JS त्रुटि नहीं', not errs, str(errs))
+    # Admin: नया सदस्य (साझेदार = Read+Write, सहायक = केवल Write) और रीसेट अनुरोध
+    st = state_of(pg)
+    pg, errs = open_as(p, 'admin', state=st)
+    pg.click('#tabs button[data-t="members"]'); pg.wait_for_timeout(500)
+    check('Admin: "नया सदस्य बनाएँ" और 6 अंकों का पासवर्ड पहले से भरा', pg.is_visible('#newMember') and len(pg.input_value('#nmPin')) == 6 and pg.input_value('#nmPin').isdigit())
+    pg.fill('#nmName', 'अमरनाथ पाण्डेय'); pg.fill('#nmLogin', 'amarnath'); pg.select_option('#nmRole', 'partner'); pg.fill('#nmPin', '482915')
+    pg.click('#nmBtn'); pg.wait_for_timeout(500)
+    iv = [c for c in pg.evaluate('window.__calls') if c[0] == 'invoke' and c[1] == 'sk-admin-users']
+    check('साझेदार: Read+Write (सुधार नहीं), आईडी/पासवर्ड function को', iv and iv[-1][2] == {'action': 'create', 'login': 'amarnath', 'name': 'अमरनाथ पाण्डेय', 'password': '482915', 'read': True, 'write': True, 'correct': False}, str(iv))
+    check('बनने पर आईडी और पासवर्ड Admin को दिखे', pg.is_visible('#modal') and 'amarnath' in pg.inner_text('#modalBody') and '482915' in pg.inner_text('#modalBody'))
+    pg.click('#modalOk'); pg.wait_for_timeout(400)
+    pg.fill('#nmName', 'सहायक'); pg.fill('#nmLogin', 'helper'); pg.select_option('#nmRole', 'assistant'); pg.fill('#nmPin', '000123'); pg.click('#nmBtn'); pg.wait_for_timeout(500)
+    iv = [c for c in pg.evaluate('window.__calls') if c[0] == 'invoke' and c[1] == 'sk-admin-users']
+    check('सहायक: केवल Write', iv[-1][2]['read'] is False and iv[-1][2]['write'] is True and iv[-1][2]['correct'] is False, str(iv[-1]))
+    pg.click('#modalOk'); pg.wait_for_timeout(300)
+    n0 = len(iv); pg.fill('#nmLogin', 'Bad Id'); pg.fill('#nmName', 'x y'); pg.fill('#nmPin', '12ab56'); pg.click('#nmBtn'); pg.wait_for_timeout(300)
+    check('गलत आईडी/पासवर्ड पर function नहीं बुलाया', len([c for c in pg.evaluate('window.__calls') if c[0] == 'invoke']) == n0)
+    check('रीसेट अनुरोध Admin को सदस्य-नाम सहित दिखा', 'writer' in pg.inner_text('#resetList') and 'लेखक (परीक्षण)' in pg.inner_text('#resetList'))
+    pg.click('.rsBtn'); pg.wait_for_selector('#modal:not([hidden])'); pg.fill('#pinIn', '654321'); pg.click('#modalOk'); pg.wait_for_timeout(500)
+    iv = [c for c in pg.evaluate('window.__calls') if c[0] == 'invoke' and c[1] == 'sk-admin-users']
+    check('नया पासवर्ड: set_password (सदस्य, 6 अंक, अनुरोध-ID)', iv[-1][2] == {'action': 'set_password', 'user_id': 'u-writer', 'password': '654321', 'request_id': 1}, str(iv[-1]))
+    check('पासवर्ड बदलने के बाद अनुरोध सूची से हटा', 'कोई खुला अनुरोध नहीं' in pg.inner_text('#resetList'))
+    check('हर गैर-Admin सदस्य पर "पासवर्ड बदलें" बटन, Admin पर नहीं', pg.locator('.pinBtn').count() >= 4 and pg.locator('.pinBtn[data-u="u-admin"]').count() == 0)
+    pg.screenshot(path=f'{SHOTS}/6_admin_new_member.png', full_page=True)
+    check('Admin सदस्य-स्क्रीन में JS त्रुटि नहीं', not errs, str(errs))
+
     # Dark + desktop
     pg, errs = open_as(p, 'admin', 1280, 900, dark=True)
     pg.click('#tabs button[data-t="register"]'); pg.wait_for_timeout(400)

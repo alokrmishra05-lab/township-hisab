@@ -12,6 +12,22 @@ export const CATEGORIES = ['भूमि / रजिस्ट्री', 'मि
   'कानूनी / दस्तावेज़', 'साइट रखरखाव', 'अन्य'];
 const METHODS = ['नकद', 'UPI', 'बैंक ट्रांसफर', 'चेक', 'अन्य'];
 const BUCKET = 'sk-receipts';
+// यूज़र आईडी → अस्थायी (बिना inbox) ईमेल; SQL sk_login_email और Edge Function में भी यही नियम
+export const LOGIN_DOMAIN = 'suryakunj.example.com';
+export const loginEmail = id => { const v = String(id || '').trim().toLowerCase(); return v.includes('@') ? v : `${v}@${LOGIN_DOMAIN}`; };
+const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,39}$/;
+const PIN_RE = /^\d{6}$/;
+const newPin = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return String(a[0] % 1000000).padStart(6, '0'); };
+async function adminCall(body) {
+  const { data, error } = await db.functions.invoke('sk-admin-users', { body });
+  if (error) {
+    let m = error.message;
+    try { const j = await error.context?.json?.(); if (j?.error) m = j.error; } catch { /* मूल संदेश */ }
+    throw Error(m);
+  }
+  if (data?.error) throw Error(data.error);
+  return data;
+}
 
 let db, user, me, busy = false, rows = [], receiptsByExp = new Map(), tab = null;
 
@@ -24,7 +40,7 @@ const errText = e => {
   if (/RECEIPT_LIMIT/.test(msg)) return 'इस खर्च में रसीद नहीं जुड़ सकती — अधिकतम 5 रसीदें हो चुकी हैं या अधिकार नहीं।';
   if (/VERSION_CHANGED/.test(msg)) return 'आपके देखने के बाद यह खर्च बदला गया। सूची रिफ्रेश कर दी है — दोबारा देखें।';
   if (/failed to fetch|network/i.test(msg)) return 'इंटरनेट/सेवा से संपर्क नहीं हुआ। दोबारा कोशिश करें।';
-  if (/invalid login/i.test(msg)) return 'ईमेल या पासवर्ड गलत है।';
+  if (/invalid login/i.test(msg)) return 'यूज़र आईडी या पासवर्ड गलत है।';
   return msg.replace(/^.*?ERROR:\s*/, '');
 };
 function setBusy(v) { busy = v; document.querySelectorAll('button').forEach(b => { if (!b.closest('#modal')) b.disabled = v; }); }
@@ -61,26 +77,22 @@ function init() {
   fillSelect($('fCategory'), CATEGORIES, 'चुनें…'); fillSelect($('fMethod'), METHODS, 'चुनें…');
   fillSelect($('qCategory'), CATEGORIES, 'सभी');
   $('fDate').max = todayIST(); $('fDate').min = '2024-01-01'; $('fDate').value = todayIST();
-  let signup = false;
-  $('toggleAuth').onclick = () => {
-    signup = !signup;
-    $('authTitle').textContent = signup ? 'नया अकाउंट बनाएँ' : 'सदस्य लॉगिन';
-    $('authBtn').textContent = signup ? 'अकाउंट बनाएँ' : 'लॉगिन';
-    $('toggleAuth').textContent = signup ? 'पहले से अकाउंट है — लॉगिन करूँ' : 'नया हूँ — अकाउंट बनाऊँ';
-    $('password').autocomplete = signup ? 'new-password' : 'current-password';
-  };
   $('authForm').onsubmit = async e => {
     e.preventDefault(); if (busy) return; setBusy(true);
     try {
-      const creds = { email: $('email').value.trim(), password: $('password').value };
-      if (signup) {
-        if (creds.password.length < 10) throw Error('पासवर्ड कम से कम 10 अक्षर का रखें।');
-        const { data, error } = await db.auth.signUp(creds); if (error) throw error;
-        if (!data.session) { show('अकाउंट बना। ईमेल में आए link से पुष्टि करें, फिर लॉगिन करके जुड़ने का अनुरोध भेजें।', 'success'); return; }
-      } else {
-        const { error } = await db.auth.signInWithPassword(creds); if (error) throw error;
-      }
+      const creds = { email: loginEmail($('email').value), password: $('password').value };
+      const { error } = await db.auth.signInWithPassword(creds); if (error) throw error;
       $('password').value = ''; $('message').hidden = true; await refresh();
+    } catch (err) { show(errText(err), 'error'); } finally { setBusy(false); }
+  };
+  $('forgotBtn').onclick = () => { $('forgotForm').hidden = !$('forgotForm').hidden; $('forgotId').value = $('email').value.trim(); };
+  $('forgotForm').onsubmit = async e => {
+    e.preventDefault(); if (busy) return; setBusy(true);
+    try {
+      const { error } = await db.rpc('sk_request_password_reset', { p_login: $('forgotId').value.trim(), p_note: $('forgotNote').value.trim() || null });
+      if (error) throw error;
+      $('forgotForm').hidden = true; $('forgotNote').value = '';
+      show('अनुरोध Admin को भेज दिया गया। Admin नया पासवर्ड बताएँगे।', 'success');
     } catch (err) { show(errText(err), 'error'); } finally { setBusy(false); }
   };
   $('signOut').onclick = async () => { await db.auth.signOut(); location.reload(); };
@@ -403,6 +415,7 @@ async function loadMembers() {
   $('activeList').innerHTML = act.map(m => `<div class="item"><b>${esc(m.display_name)}</b>${m.is_admin ? ' <span class="badge">Admin</span>' : ''}
       ${m.is_admin ? '<small>Admin के सभी अधिकार स्थायी हैं।</small>' : `${box(m, 'a')}
       <div class="row"><button type="button" class="secondary saveBtn" data-u="${esc(m.user_id)}">अधिकार सहेजें</button>
+      <button type="button" class="secondary pinBtn" data-u="${esc(m.user_id)}">पासवर्ड बदलें</button>
       <button type="button" class="danger rmBtn" data-u="${esc(m.user_id)}">पहुँच हटाएँ</button></div>`}</div>`).join('');
   $('closedList').innerHTML = closed.map(m => `<div>${esc(m.display_name)} — ${m.status === 'rejected' ? 'अस्वीकृत' : 'हटाया गया'} ${when(m.decided_at)}${m.decision_note ? ' · ' + esc(m.decision_note) : ''}</div>`).join('') || 'कोई नहीं।';
   const rights = (u, pre) => ['r', 'w', 'c'].map(k => $(`${pre}${k}-${u}`).checked);
@@ -438,9 +451,49 @@ async function loadMembers() {
     html: '<p>सदस्य तुरंत खर्च और रसीदें नहीं देख पाएगा। उसकी पुरानी एंट्रियाँ रिकॉर्ड में रहेंगी।</p><label for="rmNote">कारण (वैकल्पिक)</label><input id="rmNote" maxlength="300">',
     onOk: async () => { await call('sk_admin_remove', { p_user: b.dataset.u, p_note: $('rmNote').value || null }, 'पहुँच हटा दी गई।'); return true; },
   }));
+  // नया सदस्य (Admin खाता बनाता है)
+  $('nmGen').onclick = () => { $('nmPin').value = newPin(); };
+  if (!$('nmPin').value) $('nmPin').value = newPin();
+  $('newMember').onsubmit = async e => {
+    e.preventDefault(); if (busy) return;
+    const login = $('nmLogin').value.trim().toLowerCase(), name = $('nmName').value.trim(), pin = $('nmPin').value.trim();
+    const role = { partner: [true, true, false], assistant: [false, true, false], reader: [true, false, false] }[$('nmRole').value];
+    if (!LOGIN_RE.test(login)) { show('यूज़र आईडी 3–40 अक्षर: छोटे अंग्रेज़ी अक्षर, अंक, . _ -', 'error'); return; }
+    if (!PIN_RE.test(pin)) { show('पासवर्ड ठीक 6 अंकों का हो।', 'error'); return; }
+    setBusy(true);
+    try {
+      await adminCall({ action: 'create', login, name, password: pin, read: role[0], write: role[1], correct: role[2] });
+      $('newMember').reset(); $('nmPin').value = newPin();
+      await dialog({ title: 'सदस्य बन गया', html: `<p><b>${esc(name)}</b> का खाता बन गया। ये जानकारी सदस्य को स्वयं बताएँ:</p>
+        <div class="notice">यूज़र आईडी: <b>${esc(login)}</b><br>पासवर्ड: <b>${esc(pin)}</b></div><small>यह पासवर्ड दोबारा नहीं दिखेगा।</small>` });
+    } catch (err) { show(errText(err), 'error'); } finally { setBusy(false); await loadMembers(); }
+  };
+  const setPin = (uid, label, requestId = null) => {
+    const pin = newPin();
+    return dialog({ title: `${label} — नया पासवर्ड`, ok: 'पासवर्ड बदलें',
+      html: `<label for="pinIn">नया पासवर्ड (6 अंक)</label><input id="pinIn" inputmode="numeric" maxlength="6" value="${pin}">
+        <small>बदलने के बाद यह पासवर्ड सदस्य को स्वयं बताएँ।</small>`,
+      onOk: async () => {
+        const p = $('pinIn').value.trim();
+        if (!PIN_RE.test(p)) { show('पासवर्ड ठीक 6 अंकों का हो।', 'error'); return false; }
+        try { const r = await adminCall({ action: 'set_password', user_id: uid, password: p, request_id: requestId });
+          show(`${label} का नया पासवर्ड: ${p} — सदस्य को बताएँ।` + (r?.warning ? ' ' + r.warning : ''), 'success'); }
+        catch (err) { show(errText(err), 'error'); }
+        await loadMembers(); return true;
+      } });
+  };
+  document.querySelectorAll('.pinBtn').forEach(b => b.onclick = () => setPin(b.dataset.u, byId.get(b.dataset.u)?.display_name || ''));
+  const { data: rq, error: rqErr } = await db.rpc('sk_admin_reset_requests');
+  $('resetList').innerHTML = rqErr ? esc(errText(rqErr)) : (rq || []).map(q => `<div class="item"><b>${esc(q.login)}</b>
+      ${q.member_name ? `→ ${esc(q.member_name)}${q.member_status !== 'active' ? ` <small>(${esc(q.member_status)})</small>` : ''}` : ' <small>(इस आईडी का कोई सदस्य नहीं)</small>'}
+      <small>${when(q.requested_at)}</small>${q.note ? `<div>${esc(q.note)}</div>` : ''}
+      <div class="row" style="margin-top:8px">${q.member_user && !q.member_is_admin ? `<button type="button" class="rsBtn" data-u="${esc(q.member_user)}" data-n="${esc(q.member_name)}" data-q="${q.id}">नया पासवर्ड रखें</button>` : ''}
+      <button type="button" class="secondary rdBtn" data-q="${q.id}">खारिज करें</button></div></div>`).join('') || 'कोई खुला अनुरोध नहीं।';
+  document.querySelectorAll('.rsBtn').forEach(b => b.onclick = () => setPin(b.dataset.u, b.dataset.n, Number(b.dataset.q)));
+  document.querySelectorAll('.rdBtn').forEach(b => b.onclick = () => call('sk_admin_close_reset', { p_id: Number(b.dataset.q), p_status: 'dismissed' }, 'अनुरोध खारिज।'));
   const { data: au } = await db.from('sk_member_audit').select('member_id,action,at,note,new_data').order('at', { ascending: false }).limit(200);
   const names = new Map(data.map(m => [m.user_id, m.display_name]));
-  const A = { admin_bootstrap: 'Admin तय', requested: 'अनुरोध', approved: 'मंज़ूर', rejected: 'अस्वीकृत', rights_changed: 'अधिकार बदले', removed: 'पहुँच हटाई' };
+  const A = { added_by_admin: 'Admin ने बनाया', admin_bootstrap: 'Admin तय', requested: 'अनुरोध', approved: 'मंज़ूर', rejected: 'अस्वीकृत', rights_changed: 'अधिकार बदले', removed: 'पहुँच हटाई' };
   $('memberAudit').innerHTML = (au || []).map(a => `${when(a.at)} — ${esc(names.get(a.member_id) || a.member_id)}: <b>${A[a.action] || esc(a.action)}</b>` +
     (a.new_data ? ` (R:${a.new_data.can_read ? '✓' : '✗'} W:${a.new_data.can_write ? '✓' : '✗'} सुधार:${a.new_data.can_correct ? '✓' : '✗'})` : '') + (a.note ? ' · ' + esc(a.note) : '')).join('<br>');
 }

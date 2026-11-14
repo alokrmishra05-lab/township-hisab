@@ -40,7 +40,6 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
       - name: Capacitor Android प्रोजेक्ट
         run: |
           npm install

@@ -1,34 +1,23 @@
-name: वेबसाइट और APK बनाएँ
+name: APK बनाएँ
 
 on:
   push:
     branches: [main]
+    paths:
+      - capacitor.config.json
+      - package.json
+      - site/icons/**
+      - .github/workflows/build.yml
   workflow_dispatch:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
   group: build
   cancel-in-progress: true
 
 jobs:
-  pages:
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - id: deploy
-        uses: actions/deploy-pages@v4
-
   apk:
     runs-on: ubuntu-latest
     steps:

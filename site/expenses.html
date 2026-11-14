@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14532d">
+<meta name="referrer" content="no-referrer">
+<title>खर्च रजिस्टर | सूर्य कुंज आवासीय योजना</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f6f5f0;--card:#fff;--ink:#1c1f1a;--muted:#646b61;--line:#e3e5de;--brand:#14532d;--brand-soft:#e7f1ea;
+  --warn-bg:#fff4da;--warn-line:#efd497;--err-bg:#ffeded;--err-line:#f0b6b6;--ok-bg:#e7f7eb;--ok-line:#a7d6b4;--field:#fff;--field-line:#ccd5c8}
+@media (prefers-color-scheme:dark){:root{--bg:#111410;--card:#1a1e19;--ink:#eef0ea;--muted:#9aa093;--line:#2b3029;--brand:#4ade80;--brand-soft:#1d2b21;
+  --warn-bg:#3a2f12;--warn-line:#6b5420;--err-bg:#3b1717;--err-line:#7a2e2e;--ok-bg:#16301d;--ok-line:#2f6b3e;--field:#141813;--field-line:#394036}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans Devanagari",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+main{max-width:760px;margin:auto;padding:14px 14px 60px}
+header{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px}
+a{color:var(--brand)}
+h1{font-size:22px;margin:10px 0 2px}h2{font-size:17px;margin:0 0 12px}h3{font-size:15px;margin:14px 0 8px}
+.sub{color:var(--muted);font-size:14px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0}
+label{font-size:13px;font-weight:600;display:block;margin:12px 0 5px}
+input,select,textarea{font:inherit;font-size:16px;width:100%;border:1px solid var(--field-line);background:var(--field);border-radius:10px;padding:11px;color:var(--ink);min-height:44px}
+textarea{min-height:68px;resize:vertical}input[type=file]{font-size:14px;padding:9px}
+input[type=checkbox]{width:auto;min-height:auto}
+button{font:inherit;font-weight:600;font-size:15px;background:var(--brand);border:0;color:#fff;border-radius:10px;padding:10px 15px;cursor:pointer;min-height:44px}
+@media (prefers-color-scheme:dark){button{color:#0b1a10}}
+button:disabled{opacity:.55;cursor:wait}
+.secondary{background:var(--brand-soft);color:var(--brand)!important}
+.danger{background:#b42318;color:#fff!important}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.row>*{flex:1;min-width:130px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}@media(max-width:520px){.grid{grid-template-columns:1fr}}
+.badge{border-radius:7px;padding:2px 8px;font-size:12px;font-weight:600;display:inline-block;background:var(--ok-bg);border:1px solid var(--ok-line)}
+.b-no{background:var(--err-bg);border-color:var(--err-line)}.b-warn{background:var(--warn-bg);border-color:var(--warn-line)}
+.muted,small{color:var(--muted);font-size:13px}small{display:block;margin-top:4px}
+.item{border-top:1px solid var(--line);padding:14px 0}.item:first-child{border-top:0;padding-top:0}
+.item.cancelled{opacity:.75}.item.cancelled .amount{text-decoration:line-through}
+.amount{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+.ref{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.notice{padding:12px;border-radius:12px;background:var(--warn-bg);border:1px solid var(--warn-line);margin:12px 0;font-size:14px;white-space:pre-wrap}
+.notice.error{background:var(--err-bg);border-color:var(--err-line)}.notice.success{background:var(--ok-bg);border-color:var(--ok-line)}
+[hidden]{display:none!important}
+.tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:4px;margin:12px 0;position:sticky;top:6px;z-index:5;overflow-x:auto}
+.tabs button{flex:1;background:none;color:var(--muted)!important;font-size:14px;padding:8px 6px;min-height:40px;white-space:nowrap}
+.tabs button.on{background:var(--brand-soft);color:var(--brand)!important}
+.totals{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:8px 0}
+.totals div{background:var(--bg);border-radius:10px;padding:10px}.totals b{display:block;font-size:17px;font-variant-numeric:tabular-nums}
+.totals span{font-size:12px;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.audit{font-size:12px;color:var(--muted);margin-top:8px;border-left:2px solid var(--line);padding-left:8px}
+.rights{display:flex;gap:14px;flex-wrap:wrap;margin:8px 0}.rights label{display:flex;gap:6px;align-items:center;margin:0;font-weight:500}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #ddaa28;outline-offset:2px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;z-index:50}
+.sheet{background:var(--card);color:var(--ink);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:92vh;overflow:auto}
+@media(min-width:600px){.modal{align-items:center}.sheet{border-radius:18px}}
+.sheet h3{margin:0 0 8px;font-size:18px}
+</style>
+</head>
+<body>
+<main>
+<header><a href="./">← मुख्य हिसाब</a><button id="signOut" class="secondary" hidden>लॉगआउट</button></header>
+<h1>खर्च रजिस्टर</h1><div class="sub">सूर्य कुंज आवासीय योजना · सदस्यों के लिए निजी · मूल हिसाब और साझेदारों के निवेश पर असर नहीं</div>
+<div id="setup" class="notice" hidden>यह सुविधा अभी चालू नहीं है। Admin को अलग Surya Kunj Supabase सेटअप पूरा करना है (EXPENSE-REGISTER.md)।</div>
+<div id="message" class="notice" hidden role="status" aria-live="polite"></div>
+
+<section id="loginBox" class="card" hidden>
+  <h2 id="authTitle">सदस्य लॉगिन</h2>
+  <form id="authForm">
+    <label for="email">ईमेल</label><input id="email" type="email" autocomplete="username" required>
+    <label for="password">पासवर्ड</label><input id="password" type="password" autocomplete="current-password" minlength="10" required>
+    <button type="submit" id="authBtn" style="margin-top:14px;width:100%">लॉगिन</button>
+  </form>
+  <button type="button" id="toggleAuth" class="secondary" style="margin-top:10px;width:100%">नया हूँ — अकाउंट बनाऊँ</button>
+  <small>अकाउंट बनने के बाद Admin की मंज़ूरी तक रजिस्टर नहीं खुलेगा। मुख्य हिसाब का साझा पासवर्ड यहाँ काम नहीं करेगा।</small>
+</section>
+
+<section id="joinBox" class="card" hidden>
+  <h2>रजिस्टर से जुड़ने का अनुरोध</h2>
+  <div id="joinState" class="muted"></div>
+  <form id="joinForm">
+    <label for="joinName">आपका नाम *</label><input id="joinName" maxlength="100" required>
+    <button type="submit" id="joinBtn" style="margin-top:14px;width:100%">अनुरोध भेजें</button>
+  </form>
+</section>
+
+<div id="workspace" hidden>
+  <div class="muted" id="identity"></div>
+  <nav class="tabs" id="tabs"></nav>
+
+  <section id="v-add" class="card" hidden>
+    <h2>नया खर्च जोड़ें</h2>
+    <form id="addForm" novalidate>
+      <div class="grid">
+        <div><label for="fDate">तारीख *</label><input id="fDate" type="date" required></div>
+        <div><label for="fAmount">राशि (₹, पैसे तक) *</label><input id="fAmount" inputmode="decimal" placeholder="जैसे 2450.50" required></div>
+        <div><label for="fCategory">श्रेणी *</label><select id="fCategory" required></select></div>
+        <div><label for="fMethod">भुगतान का तरीका *</label><select id="fMethod" required></select></div>
+      </div>
+      <label for="fItem">मद (किस चीज़/काम पर) *</label><input id="fItem" maxlength="200" required placeholder="जैसे: सीमेंट 50 बोरी">
+      <label for="fPayer">भुगतानकर्ता (किसने पैसा दिया) *</label><input id="fPayer" maxlength="100" list="payers" required>
+      <label for="fReceipt">रसीद (वैकल्पिक) — JPG, PNG, WEBP, PDF, DOCX</label>
+      <input id="fReceipt" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+      <small>अधिकतम 5 फ़ाइलें, हर एक 10 MB तक। रसीदें निजी रहती हैं और जुड़ने के बाद बदली/हटाई नहीं जा सकतीं।</small>
+      <button id="addBtn" type="submit" style="margin-top:16px;width:100%">खर्च सहेजें</button>
+    </form>
+    <div id="addedList" class="muted" style="margin-top:10px"></div>
+  </section>
+
+  <section id="v-register" hidden>
+    <div class="card">
+      <h2>फ़िल्टर</h2>
+      <div class="grid">
+        <div><label for="qFrom">तारीख से</label><input id="qFrom" type="date"></div>
+        <div><label for="qTo">तारीख तक</label><input id="qTo" type="date"></div>
+        <div><label for="qCategory">श्रेणी</label><select id="qCategory"></select></div>
+        <div><label for="qPayer">भुगतानकर्ता</label><input id="qPayer" list="payers" placeholder="सभी"></div>
+      </div>
+      <div class="row" style="margin-top:12px"><button id="applyFilter" type="button">दिखाएँ</button>
+        <button id="clearFilter" type="button" class="secondary">फ़िल्टर हटाएँ</button></div>
+    </div>
+    <div class="card" id="summaryCard">
+      <h2>कुल (केवल सक्रिय खर्च)</h2>
+      <div class="totals" id="totals"></div>
+      <div class="grid"><div><h3>महीने के अनुसार</h3><table id="byMonth"></table></div>
+        <div><h3>श्रेणी के अनुसार</h3><table id="byCategory"></table></div></div>
+    </div>
+    <div class="card"><h2 id="listTitle">खर्च</h2><div id="entries" class="muted">लोड हो रहा है…</div></div>
+  </section>
+
+  <section id="v-members" hidden>
+    <div class="card"><h2>जुड़ने के अनुरोध (Pending)</h2><div id="pendingList" class="muted"></div></div>
+    <div class="card"><h2>सक्रिय सदस्य और अधिकार</h2>
+      <small>Read = सूची, फ़िल्टर, कुल · Write = नया खर्च + रसीद · सुधार = खर्च सुधारना/रद्द करना और सभी रसीदें देखना (सूची खोजने हेतु सुधार के साथ Read भी दें)।</small>
+      <div id="activeList" class="muted" style="margin-top:10px"></div></div>
+    <div class="card"><h2>अस्वीकृत / हटाए गए</h2><div id="closedList" class="muted"></div></div>
+    <div class="card"><h2>सदस्य-बदलाव का रिकॉर्ड</h2><div id="memberAudit" class="audit"></div></div>
+  </section>
+
+  <section id="v-export" class="card" hidden>
+    <h2>CSV निर्यात और मिलान (केवल Admin)</h2>
+    <div class="row"><button id="csvExpenses" type="button">पूरा खर्च रजिस्टर CSV</button>
+      <button id="csvAudit" type="button" class="secondary">खर्च बदलाव-रिकॉर्ड CSV</button>
+      <button id="csvMembers" type="button" class="secondary">सदस्य-रिकॉर्ड CSV</button></div>
+    <div id="reconcile" class="notice" hidden></div>
+    <h3>रसीदों की प्रति</h3>
+    <small>नीचे हर रसीद का 5 मिनट वाला निजी link बनता है; एक-एक कर खोलकर सहेजें। पूरी प्रति के लिए EXPENSE-REGISTER.md का "समापन" भाग देखें।</small>
+    <button id="listReceipts" type="button" class="secondary" style="margin-top:8px">रसीदों की सूची बनाएँ</button>
+    <div id="receiptList" class="muted" style="margin-top:8px"></div>
+  </section>
+</div>
+<datalist id="payers"><option>आलोक रंजन मिश्र</option><option>अमरनाथ पाण्डेय</option><option>गगन आचारी</option><option>साइट कैश</option><option>परियोजना फंड</option></datalist>
+</main>
+
+<div id="modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="sheet"><h3 id="modalTitle"></h3><div id="modalBody"></div>
+    <div class="row" style="margin-top:16px"><button id="modalOk" type="button"></button>
+      <button id="modalCancel" type="button" class="secondary">रद्द करें</button></div></div>
+</div>
+
+<script src="expenses-config.js"></script>
+<script src="vendor/supabase-js-2.119.0.umd.js"
+        integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
+<script type="module" src="js/register.js"></script>
+</body>
+</html>

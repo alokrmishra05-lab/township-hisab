@@ -54,8 +54,12 @@ def total(who, **kw):
              (kw.get("f"), kw.get("t"), kw.get("c"), kw.get("p")))
     return {(k, key): (n, Decimal(t)) for k, key, n, t in rows}
 
+def reserve(who, exp, ext="pdf"):
+    return val(who, "select public.sk_reserve_receipt_slot(%s,%s)", (exp, ext))
+
 def upload(who, exp, ext="pdf", mime="application/pdf", size=2048, path=None):
-    path = path or f"{U[who]}/{exp}/{uuid.uuid4()}.{ext}"
+    """path न दें: पहले server-आरक्षण (जैसा UI करता है)। path दें: बिना आरक्षण सीधा storage प्रयास।"""
+    path = path or reserve(who, exp, ext)
     q(who, "insert into storage.objects(bucket_id,name,owner_id,metadata) values ('sk-receipts',%s,%s,%s)",
       (path, U[who], json.dumps({"mimetype": mime, "size": size})))
     return path
@@ -104,7 +108,8 @@ for who in ["pending", "rejected", "removed", "outsider"]:
     run(G, f"{who}: कुल (summary) RPC रुका", lambda w=who: q(w, "select * from public.sk_summary()"), "Read अधिकार नहीं")
     run(G, f"{who}: खर्च जोड़ना रुका", lambda w=who: add(w), "Write")
     run(G, f"{who}: सुधार RPC रुका", lambda w=who: q(w, "select public.sk_correct_expense(%s,%s,'2026-11-10','x','अन्य',1,'xy','नकद','कोई कारण')", (e1[0], e1[2])), "सुधार")
-    run(G, f"{who}: रसीद upload रुका", lambda w=who: upload(w, e1[0]), "row-level security")
+    run(G, f"{who}: जगह-आरक्षण रुका", lambda w=who: reserve(w, e1[0]), "अधिकार नहीं")
+    run(G, f"{who}: बिना आरक्षण सीधा storage upload रुका", lambda w=who: upload(w, e1[0], path=f"{U[w]}/{e1[0]}/{uuid.uuid4()}.pdf"), "row-level security")
     run(G, f"{who}: किसी दूसरे की फ़ाइल को अपने नाम attach नहीं", lambda w=who: q(w, "select public.sk_attach_receipt(%s,%s,'x.pdf')", (e1[0], p1)), "अधिकार नहीं")
 check(G, "हटाए गए सदस्य को अपनी पुरानी रसीद भी नहीं दिखती", val("removed", "select count(*) from storage.objects") == 0)
 for role in ["anon"]:
@@ -154,8 +159,9 @@ check(G, "Write-only को खर्च सूची नहीं (Read नह�
 p_w = run(G, "Write वाला अपने खर्च में रसीद upload", lambda: upload("writer", e_w[0], ext="jpg", mime="image/jpeg"))
 run(G, "…और attach", lambda: q("writer", "select public.sk_attach_receipt(%s,%s,'IMG.jpg')", (e_w[0], p_w)))
 check(G, "Write वाला अपनी रसीद देख सकता है", val("writer", "select count(*) from storage.objects") == 1)
-run(G, "Write वाला दूसरे के खर्च में रसीद नहीं जोड़ सकता", lambda: upload("writer", e1[0]), "row-level security")
-check(G, "Admin भी storage से रसीद delete नहीं कर सकता (0 पंक्ति)", q("admin", "delete from storage.objects") == 0)
+run(G, "Write वाला दूसरे के खर्च में जगह आरक्षित नहीं कर सकता", lambda: upload("writer", e1[0]), "अधिकार नहीं")
+run(G, "…और सीधा storage upload भी नहीं", lambda: upload("writer", e1[0], path=f"{U['writer']}/{e1[0]}/{uuid.uuid4()}.pdf"), "row-level security")
+check(G, "Admin भी storage से जुड़ी रसीद delete नहीं कर सकता (0 पंक्ति)", q("admin", "delete from storage.objects") == 0)
 check(G, "Admin भी रसीद overwrite नहीं कर सकता (0 पंक्ति)", q("admin", "update storage.objects set metadata='{}'::jsonb") == 0)
 run(G, "सुधार वाला नया खर्च नहीं जोड़ सकता (Write नहीं)", lambda: add("corrector"), "Write")
 run(G, "सुधार वाला summary नहीं देखता (Read नहीं)", lambda: q("corrector", "select * from public.sk_summary()"), "Read")
@@ -238,45 +244,150 @@ check(G, "एंट्री करने वाला और समय अप�
 
 # ---------- रसीद की बाकी जाँचें
 G = "रसीद"
-run(G, "storage में फ़ाइल न हो तो attach नहीं", lambda: q("rw", "select public.sk_attach_receipt(%s,%s,'x.pdf')", (e1[0], f"{U['rw']}/{e1[0]}/{uuid.uuid4()}.pdf")), "storage में")
+run(G, "आरक्षण के बिना attach नहीं", lambda: q("rw", "select public.sk_attach_receipt(%s,%s,'x.pdf')", (e1[0], f"{U['rw']}/{e1[0]}/{uuid.uuid4()}.pdf")), "वैध आरक्षण नहीं")
+pr = reserve("rw", e1[0])
+run(G, "आरक्षण है पर फ़ाइल नहीं चढ़ी तो attach नहीं", lambda: q("rw", "select public.sk_attach_receipt(%s,%s,'x.pdf')", (e1[0], pr)), "storage में")
+q("rw", "select public.sk_release_receipt_slot(%s)", (pr,))
 pb = upload("rw", e1[0], mime="image/png")
 run(G, "extension/MIME बेमेल तो attach नहीं", lambda: q("rw", "select public.sk_attach_receipt(%s,%s,'x.pdf')", (e1[0], pb)), "मेल नहीं")
-run(G, ".exe / .doc upload नहीं", lambda: upload("rw", e1[0], ext="doc", mime="application/msword"), "row-level security")
+run(G, ".doc के लिए जगह-आरक्षण नहीं", lambda: upload("rw", e1[0], ext="doc", mime="application/msword"), "केवल JPG")
+run(G, ".doc सीधा storage upload भी नहीं", lambda: upload("rw", e1[0], path=f"{U['rw']}/{e1[0]}/{uuid.uuid4()}.doc"), "row-level security")
 run(G, "रसीद पंक्ति सीधे नहीं डाल सकते", lambda: q("rw", "insert into public.sk_receipts(expense_id,storage_path,original_filename,mime_type,size_bytes,uploaded_by) values (%s,'a/b/c.pdf','c.pdf','application/pdf',1,%s)", (e1[0], U["rw"])), "permission denied")
 run(G, "user रसीद को verified नहीं कर सकता", lambda: q("admin", "update public.sk_receipts set verification_status='verified'"), "permission denied")
 cur.execute("select set_config('request.jwt.claim.sub','',false)"); cur.execute("set role service_role")
 cur.execute("update public.sk_receipts set verification_status='verified', sha256=%s, verified_at=now() where id=%s", ("a" * 64, r1))
 cur.execute("reset role")
 check(G, "server जाँच का परिणाम बदलाव-रिकॉर्ड में", val("admin", "select count(*) from public.sk_expense_audit where action='receipt_verified'") == 1)
-run(G, "रद्द खर्च में नई रसीद नहीं", lambda: upload("corrector", e_w[0]), "row-level security")
+run(G, "रद्द खर्च में नई रसीद-जगह नहीं", lambda: upload("corrector", e_w[0]), "अधिकार नहीं")
 
-# ---------- प्रति खर्च अधिकतम 5 रसीदें (server पर)
+# ---------- प्रति खर्च अधिकतम 5 रसीदें — server-आरक्षण (जुड़ी + लंबित ≤ 5)
 G = "5 रसीद सीमा"
-import threading
+import threading, time
+DBN = sys.argv[1] if len(sys.argv) > 1 else "t"
+def storage_count(exp):
+    cur.execute("select count(*) from storage.objects where bucket_id='sk-receipts' and name like %s", (f"%/{exp}/%",)); return cur.fetchone()[0]
+def receipts_count(exp):
+    cur.execute("select count(*) from public.sk_receipts where expense_id=%s", (exp,)); return cur.fetchone()[0]
+def used(exp):
+    cur.execute("select public.sk_slots_used(%s)", (exp,)); return cur.fetchone()[0]
+def full_upload_thread(who, exp, out, barrier):
+    """एक असली client की तरह: आरक्षण → upload → attach, अलग connection से, साथ-साथ।"""
+    cc = psycopg2.connect(dbname=DBN); cc.autocommit = True; kk = cc.cursor()
+    kk.execute("select set_config('request.jwt.claim.sub', %s, false)", (U[who],)); kk.execute("set role authenticated")
+    barrier.wait()
+    try:
+        kk.execute("select public.sk_reserve_receipt_slot(%s,'pdf')", (exp,)); path = kk.fetchone()[0]
+        time.sleep(0.2)
+        kk.execute("insert into storage.objects(bucket_id,name,owner_id,metadata) values ('sk-receipts',%s,%s,%s)",
+                   (path, U[who], json.dumps({"mimetype": "application/pdf", "size": 77})))
+        kk.execute("select public.sk_attach_receipt(%s,%s,'saath.pdf')", (exp, path)); out.append("स्वीकार")
+    except psycopg2.Error as ex:
+        out.append("RECEIPT_LIMIT" if "RECEIPT_LIMIT" in (ex.pgerror or "") else "अन्य: " + (ex.pgerror or "")[:70])
+    cc.close()
+
 e5 = add("rw", item="पाँच रसीद परीक्षण", amt="10.00")
 for i in range(4):
     q("rw", "select public.sk_attach_receipt(%s,%s,%s)", (e5[0], upload("rw", e5[0]), f"r{i}.pdf"))
-check(G, "4 रसीदें जुड़ीं", val("admin", "select count(*) from public.sk_receipts where expense_id=%s", (e5[0],)) == 4)
-pa, pb = upload("rw", e5[0]), None
-run(G, "storage: 6वीं फ़ाइल upload रुकी (folder में 5 पहले से)", lambda: upload("rw", e5[0]), "row-level security")
-# साथ-साथ दो attach: एक पहले से अपलोड (pa) + एक नया path जो storage में डालें बिना सीमा के (superuser से, race अनुकरण)
-pb = f"{U['rw']}/{e5[0]}/{uuid.uuid4()}.pdf"
-cur.execute("insert into storage.objects(bucket_id,name,owner_id,metadata) values ('sk-receipts',%s,%s,%s)", (pb, U["rw"], json.dumps({"mimetype": "application/pdf", "size": 9})))
-outs = []
-def worker(path):
-    cc = psycopg2.connect(dbname=sys.argv[1] if len(sys.argv) > 1 else "t"); kk = cc.cursor()
-    kk.execute("select set_config('request.jwt.claim.sub', %s, false)", (U["rw"],)); kk.execute("set role authenticated")
-    try:
-        kk.execute("select pg_sleep(0.3)"); kk.execute("select public.sk_attach_receipt(%s,%s,'x.pdf')", (e5[0], path)); cc.commit(); outs.append("ok")
-    except psycopg2.Error as ex:
-        cc.rollback(); outs.append("रुका" if "RECEIPT_LIMIT" in (ex.pgerror or "") else "अन्य: " + (ex.pgerror or "")[:60])
-    cc.close()
-ts = [threading.Thread(target=worker, args=(x,)) for x in (pa, pb)]
+check(G, "शुरुआत: 4 रसीदें जुड़ी, storage में 4 फ़ाइलें", receipts_count(e5[0]) == 4 and storage_count(e5[0]) == 4)
+# मुख्य केस: चार के बाद दो समवर्ती अपलोड (दो अलग सदस्य/सत्र)
+outs = []; bar = threading.Barrier(2)
+ts = [threading.Thread(target=full_upload_thread, args=(w, e5[0], outs, bar)) for w in ("rw", "admin")]
 [t.start() for t in ts]; [t.join() for t in ts]
-n5 = val("admin", "select count(*) from public.sk_receipts where expense_id=%s", (e5[0],))
-check(G, "साथ-साथ दो attach (4→?): एक सफल, एक RECEIPT_LIMIT से रुका", sorted(outs) == ["ok", "रुका"], str(outs))
-check(G, "रसीदें ठीक 5 (6 कभी नहीं)", n5 == 5, str(n5))
-run(G, "Admin भी 6वीं रसीद नहीं जोड़ सकता", lambda: q("admin", "select public.sk_attach_receipt(%s,%s,'y.pdf')", (e5[0], upload("admin", e5[0]))), "row-level security")
+check(G, "दो समवर्ती अपलोड: केवल एक स्वीकार, दूसरा RECEIPT_LIMIT", sorted(outs) == ["RECEIPT_LIMIT", "स्वीकार"], str(outs))
+check(G, "Storage में छठी फ़ाइल नहीं बनी (ठीक 5)", storage_count(e5[0]) == 5, str(storage_count(e5[0])))
+check(G, "खर्च से जुड़ी रसीदें ठीक 5", receipts_count(e5[0]) == 5, str(receipts_count(e5[0])))
+run(G, "अब नया आरक्षण भी RECEIPT_LIMIT", lambda: reserve("rw", e5[0]), "RECEIPT_LIMIT")
+# सीधे storage पर, बिना आरक्षण, दो समवर्ती प्रयास
+def direct(who, exp, out, barrier):
+    cc = psycopg2.connect(dbname=DBN); cc.autocommit = True; kk = cc.cursor()
+    kk.execute("select set_config('request.jwt.claim.sub', %s, false)", (U[who],)); kk.execute("set role authenticated")
+    barrier.wait()
+    try:
+        kk.execute("insert into storage.objects(bucket_id,name,owner_id,metadata) values ('sk-receipts',%s,%s,%s)",
+                   (f"{U[who]}/{exp}/{uuid.uuid4()}.pdf", U[who], json.dumps({"mimetype": "application/pdf", "size": 5}))); out.append("स्वीकार")
+    except psycopg2.Error as ex:
+        out.append("RLS" if "row-level security" in (ex.pgerror or "") else (ex.pgerror or "")[:60])
+    cc.close()
+outs = []; bar = threading.Barrier(2)
+ts = [threading.Thread(target=direct, args=("rw", e5[0], outs, bar)) for _ in range(2)]
+[t.start() for t in ts]; [t.join() for t in ts]
+check(G, "बिना आरक्षण दो समवर्ती सीधे storage upload: दोनों अस्वीकार", outs == ["RLS", "RLS"], str(outs))
+check(G, "…storage में फिर भी 5", storage_count(e5[0]) == 5)
+
+# 4 जुड़ी + 1 लंबित आरक्षण = 5: एक साथ दो आरक्षण-अनुरोध
+e6 = add("rw", item="आरक्षण परीक्षण", amt="20.00")
+for i in range(4):
+    q("rw", "select public.sk_attach_receipt(%s,%s,%s)", (e6[0], upload("rw", e6[0]), f"q{i}.pdf"))
+res_out = []
+def reserve_thread(who, out, barrier):
+    cc = psycopg2.connect(dbname=DBN); cc.autocommit = True; kk = cc.cursor()
+    kk.execute("select set_config('request.jwt.claim.sub', %s, false)", (U[who],)); kk.execute("set role authenticated"); barrier.wait()
+    try: kk.execute("select public.sk_reserve_receipt_slot(%s,'png')", (e6[0],)); out.append(kk.fetchone()[0])
+    except psycopg2.Error as ex: out.append("RECEIPT_LIMIT" if "RECEIPT_LIMIT" in (ex.pgerror or "") else (ex.pgerror or "")[:60])
+    cc.close()
+bar = threading.Barrier(3)
+ts = [threading.Thread(target=reserve_thread, args=(w, res_out, bar)) for w in ("rw", "rw", "admin")]
+[t.start() for t in ts]; [t.join() for t in ts]
+got = [x for x in res_out if x != "RECEIPT_LIMIT"]
+check(G, "तीन समवर्ती आरक्षण (4 जुड़ी पर): केवल एक जगह मिली", len(got) == 1 and res_out.count("RECEIPT_LIMIT") == 2, str(res_out))
+check(G, "घिरी जगहें = 4 जुड़ी + 1 लंबित = 5", used(e6[0]) == 5)
+slot = got[0]
+same = []
+def same_path(out, barrier):
+    cc = psycopg2.connect(dbname=DBN); cc.autocommit = True; kk = cc.cursor()
+    owner = U["rw"] if slot.startswith(U["rw"]) else U["admin"]
+    kk.execute("select set_config('request.jwt.claim.sub', %s, false)", (owner,)); kk.execute("set role authenticated"); barrier.wait()
+    try:
+        kk.execute("insert into storage.objects(bucket_id,name,owner_id,metadata) values ('sk-receipts',%s,%s,%s)",
+                   (slot, owner, json.dumps({"mimetype": "image/png", "size": 5}))); out.append("स्वीकार")
+    except psycopg2.Error as ex: out.append("दोहरा" if "duplicate key" in (ex.pgerror or "") else (ex.pgerror or "")[:60])
+    cc.close()
+bar = threading.Barrier(2)
+ts = [threading.Thread(target=same_path, args=(same, bar)) for _ in range(2)]
+[t.start() for t in ts]; [t.join() for t in ts]
+check(G, "एक ही आरक्षित path पर दो समवर्ती upload: एक ही फ़ाइल बनती है", sorted(same) == ["दोहरा", "स्वीकार"] and storage_count(e6[0]) == 5, str(same))
+owner_of_slot = "rw" if slot.startswith(U["rw"]) else "admin"
+
+# असफल / बीच में छूटा अपलोड → जगह सुरक्षित वापसी
+G = "जगह वापसी"
+e7 = add("rw", item="वापसी परीक्षण", amt="30.00")
+for i in range(4):
+    q("rw", "select public.sk_attach_receipt(%s,%s,%s)", (e7[0], upload("rw", e7[0]), f"z{i}.pdf"))
+s1 = reserve("rw", e7[0])
+run(G, "5 घिरी होने पर दूसरा आरक्षण रुका", lambda: reserve("admin", e7[0]), "RECEIPT_LIMIT")
+run(G, "upload विफल (फ़ाइल नहीं चढ़ी) → स्वयं जगह छोड़ना", lambda: q("rw", "select public.sk_release_receipt_slot(%s)", (s1,)))
+check(G, "…जगह तुरंत वापस (4 घिरी)", used(e7[0]) == 4)
+run(G, "छोड़े गए path पर बाद में upload नहीं", lambda: upload("rw", e7[0], path=s1), "row-level security")
+s2 = reserve("rw", e7[0])
+cur.execute("alter table public.sk_receipt_slots disable trigger sk_receipt_slots_guard")
+cur.execute("update public.sk_receipt_slots set expires_at = now() - interval '1 second' where storage_path=%s", (s2,))  # 15 मिनट बीतना
+cur.execute("alter table public.sk_receipt_slots enable trigger sk_receipt_slots_guard")
+check(G, "बीच में छूटा (फ़ाइल नहीं चढ़ी), समय बीता → जगह अपने-आप वापस", used(e7[0]) == 4)
+run(G, "समय बीते आरक्षण पर upload नहीं", lambda: upload("rw", e7[0], path=s2), "row-level security")
+s3 = upload("rw", e7[0])                     # फ़ाइल चढ़ी पर attach से पहले सत्र टूटा
+cur.execute("alter table public.sk_receipt_slots disable trigger sk_receipt_slots_guard")
+cur.execute("update public.sk_receipt_slots set expires_at = now() - interval '1 second' where storage_path=%s", (s3,))
+cur.execute("alter table public.sk_receipt_slots enable trigger sk_receipt_slots_guard")
+check(G, "फ़ाइल चढ़ी पर जुड़ी नहीं (समय बीता) → जगह अब भी घिरी (storage 5 से ऊपर न जाए)", used(e7[0]) == 5 and storage_count(e7[0]) == 5)
+run(G, "…ऐसे में नया आरक्षण रुका", lambda: reserve("admin", e7[0]), "RECEIPT_LIMIT")
+opens = q("rw", "select storage_path, uploaded from public.sk_my_open_slots()")
+check(G, "सदस्य को अपना अधूरा अपलोड recovery सूची में दिखता है", (s3, True) in opens, str(opens))
+run(G, "फ़ाइल रहते जगह छोड़ना रुका", lambda: q("rw", "select public.sk_release_receipt_slot(%s)", (s3,)), "फ़ाइल चढ़ चुकी")
+check(G, "दूसरा सदस्य यह अधूरी फ़ाइल नहीं हटा सकता (0)", q("writer", "delete from storage.objects where name=%s", (s3,)) == 0)
+check(G, "स्वामी अपनी अधूरी फ़ाइल हटा सकता है (1)", q("rw", "delete from storage.objects where name=%s", (s3,)) == 1)
+run(G, "…फिर जगह छोड़ी", lambda: q("rw", "select public.sk_release_receipt_slot(%s)", (s3,)))
+check(G, "…जगह वापस (4) और storage 4", used(e7[0]) == 4 and storage_count(e7[0]) == 4)
+s4 = upload("rw", e7[0])
+cur.execute("alter table public.sk_receipt_slots disable trigger sk_receipt_slots_guard")
+cur.execute("update public.sk_receipt_slots set expires_at = now() - interval '1 second' where storage_path=%s", (s4,))
+cur.execute("alter table public.sk_receipt_slots enable trigger sk_receipt_slots_guard")
+run(G, "अधूरा अपलोड बाद में जोड़ना (recovery) संभव", lambda: q("rw", "select public.sk_attach_receipt(%s,%s,'baad.pdf')", (e7[0], s4)))
+check(G, "…अब 5 जुड़ी", receipts_count(e7[0]) == 5)
+check(G, "जुड़ी रसीद स्वामी भी नहीं हटा सकता (0)", q("rw", "delete from storage.objects where name=%s", (s4,)) == 0)
+run(G, "जुड़ी रसीद की जगह छोड़ना रुका", lambda: q("rw", "select public.sk_release_receipt_slot(%s)", (s4,)), "खुला आरक्षण नहीं")
+run(G, "आरक्षण तालिका में सीधा बदलाव रुका", lambda: q("rw", "update public.sk_receipt_slots set status='released'"), "permission denied")
+run(G, "आरक्षण-रिकॉर्ड हटाना रुका (superuser भी)", lambda: cur.execute("delete from public.sk_receipt_slots"), "हटाया नहीं")
+check(G, "सदस्य केवल अपने आरक्षण देखता है", val("writer", "select count(*) from public.sk_receipt_slots where user_id<>%s", (U["writer"],)) == 0)
 
 # ---------- रिपोर्ट
 for g, s, n, i in res:

@@ -662,16 +662,155 @@ as $$
     )
   )
 $$;
-create or replace function public.sk_upload_slot_free(p_expense uuid)
+revoke all on function public.sk_can_attach(uuid), public.sk_receipt_visible(text) from public, anon;
+grant execute on function public.sk_can_attach(uuid), public.sk_receipt_visible(text) to authenticated;
+
+-- ============================================================ रसीद-जगह आरक्षण (प्रति खर्च अधिकतम 5)
+-- हर फ़ाइल से पहले server एक "जगह" आरक्षित करता है और ठीक वही storage path देता है।
+-- Storage केवल उसी आरक्षित, समय-सीमा के भीतर वाले path पर upload स्वीकार करता है।
+-- गिनती (खर्च-पंक्ति lock के साथ): जुड़ी रसीदें + लंबित आरक्षण
+--   लंबित = 'reserved' और (समय बाकी है  या  फ़ाइल storage में चढ़ चुकी है पर अभी जुड़ी नहीं)
+-- इसलिए एक साथ आए अनुरोधों में भी storage में किसी खर्च की 5 से अधिक फ़ाइलें नहीं बनतीं।
+create table if not exists public.sk_receipt_slots (
+  id           uuid primary key default gen_random_uuid(),
+  expense_id   uuid not null references public.sk_expenses(id),
+  user_id      uuid not null references auth.users(id),
+  storage_path text not null unique,
+  status       text not null default 'reserved' check (status in ('reserved','attached','released')),
+  created_at   timestamptz not null default now(),
+  expires_at   timestamptz not null default now() + interval '15 minutes',
+  closed_at    timestamptz
+);
+create index if not exists sk_receipt_slots_exp_idx on public.sk_receipt_slots(expense_id, status);
+alter table public.sk_receipt_slots enable row level security;
+revoke all on public.sk_receipt_slots from public, anon, authenticated, service_role;
+grant select on public.sk_receipt_slots to authenticated;
+drop policy if exists "sk own or admin slots" on public.sk_receipt_slots;
+create policy "sk own or admin slots" on public.sk_receipt_slots
+  for select to authenticated using (user_id = (select auth.uid()) or (select public.sk_is_admin()));
+
+-- आरक्षण-पंक्ति: हटाना वर्जित; केवल reserved → attached/released, वह भी RPC से
+create or replace function public.sk_receipt_slots_guard()
+returns trigger language plpgsql set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'आरक्षण-रिकॉर्ड हटाया नहीं जा सकता'; end if;
+  if coalesce(current_setting('sk.rpc', true), '') <> 'on' then
+    raise exception 'आरक्षण केवल रजिस्टर के RPC से बदलता है';
+  end if;
+  if tg_op = 'UPDATE' then
+    if old.status <> 'reserved' then raise exception 'बंद आरक्षण दोबारा नहीं बदलता'; end if;
+    if (new.id, new.expense_id, new.user_id, new.storage_path, new.created_at, new.expires_at)
+       is distinct from (old.id, old.expense_id, old.user_id, old.storage_path, old.created_at, old.expires_at) then
+      raise exception 'आरक्षण का मूल विवरण नहीं बदलता';
+    end if;
+    new.closed_at := now();
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists sk_receipt_slots_guard on public.sk_receipt_slots;
+create trigger sk_receipt_slots_guard before insert or update or delete on public.sk_receipt_slots
+  for each row execute function public.sk_receipt_slots_guard();
+
+create or replace function public.sk_object_exists(p_path text)
+returns boolean language sql stable security definer set search_path = ''
+as $$ select exists (select 1 from storage.objects ob where ob.bucket_id = 'sk-receipts' and ob.name = p_path) $$;
+revoke all on function public.sk_object_exists(text) from public, anon, authenticated;
+
+-- किसी खर्च की घिरी हुई जगहें: जुड़ी रसीदें + लंबित आरक्षण
+create or replace function public.sk_slots_used(p_expense uuid)
+returns integer language sql stable security definer set search_path = ''
+as $$
+  select ((select count(*) from public.sk_receipts r where r.expense_id = p_expense)
+        + (select count(*) from public.sk_receipt_slots s
+           where s.expense_id = p_expense and s.status = 'reserved'
+             and (s.expires_at > now() or public.sk_object_exists(s.storage_path))))::integer
+$$;
+revoke all on function public.sk_slots_used(uuid) from public, anon, authenticated;
+
+-- Storage upload के लिए: यही path, इसी user का, अभी वैध आरक्षण, और फ़ाइल पहले से नहीं
+create or replace function public.sk_upload_allowed(p_path text)
 returns boolean language sql stable security definer set search_path = ''
 as $$
-  select (select count(*) from storage.objects ob
-          where ob.bucket_id = 'sk-receipts' and (storage.foldername(ob.name))[2] = p_expense::text) < 5
+  select exists (
+    select 1 from public.sk_receipt_slots s
+    where s.storage_path = p_path and s.user_id = (select auth.uid())
+      and s.status = 'reserved' and s.expires_at > now()
+      and public.sk_can_attach(s.expense_id)
+  )
 $$;
-revoke all on function public.sk_can_attach(uuid), public.sk_receipt_visible(text),
-  public.sk_upload_slot_free(uuid) from public, anon;
-grant execute on function public.sk_can_attach(uuid), public.sk_receipt_visible(text),
-  public.sk_upload_slot_free(uuid) to authenticated;
+-- अधूरी (जुड़ी नहीं) फ़ाइल हटाने के लिए: अपना या Admin, आरक्षण अभी 'reserved'
+create or replace function public.sk_unattached_deletable(p_path text)
+returns boolean language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.sk_receipt_slots s
+    where s.storage_path = p_path and s.status = 'reserved'
+      and (s.user_id = (select auth.uid()) or public.sk_is_admin())
+      and public.sk_is_active()
+  ) and not exists (select 1 from public.sk_receipts r where r.storage_path = p_path)
+$$;
+revoke all on function public.sk_upload_allowed(text), public.sk_unattached_deletable(text) from public, anon;
+grant execute on function public.sk_upload_allowed(text), public.sk_unattached_deletable(text) to authenticated;
+
+-- ---------- RPC: जगह आरक्षित करना → storage path
+create or replace function public.sk_reserve_receipt_slot(p_expense_id uuid, p_ext text)
+returns text language plpgsql security definer set search_path = ''
+as $$
+declare v_uid uuid := auth.uid(); v_ext text := lower(coalesce(p_ext, '')); v_path text;
+begin
+  if not public.sk_can_attach(p_expense_id) then
+    raise exception 'इस खर्च में रसीद जोड़ने का अधिकार नहीं (अपना खर्च + Write, या सुधार अधिकार)';
+  end if;
+  if v_ext = 'jpeg' then v_ext := 'jpg'; end if;
+  if v_ext not in ('jpg','png','webp','pdf','docx') then raise exception 'केवल JPG, PNG, WEBP, PDF, DOCX'; end if;
+  -- एक ही खर्च के सभी आरक्षण/जुड़ाव क्रम में: गिनती और नया आरक्षण एक ही lock में
+  perform 1 from public.sk_expenses where id = p_expense_id for update;
+  if public.sk_slots_used(p_expense_id) >= 5 then
+    raise exception 'RECEIPT_LIMIT: एक खर्च में अधिकतम 5 रसीदें (जुड़ी + चल रहे अपलोड)';
+  end if;
+  v_path := v_uid::text || '/' || p_expense_id::text || '/' || gen_random_uuid()::text || '.' || v_ext;
+  perform set_config('sk.rpc', 'on', true);
+  insert into public.sk_receipt_slots(expense_id, user_id, storage_path) values (p_expense_id, v_uid, v_path);
+  perform set_config('sk.rpc', 'off', true);
+  return v_path;
+end;
+$$;
+
+-- ---------- RPC: जगह छोड़ना — फ़ाइल न चढ़ी हो (या हटाई जा चुकी हो) तभी
+create or replace function public.sk_release_receipt_slot(p_storage_path text)
+returns void language plpgsql security definer set search_path = ''
+as $$
+declare s public.sk_receipt_slots%rowtype;
+begin
+  select * into s from public.sk_receipt_slots where storage_path = p_storage_path for update;
+  if not found or s.status <> 'reserved' then raise exception 'खुला आरक्षण नहीं मिला'; end if;
+  if s.user_id <> auth.uid() and not public.sk_is_admin() then raise exception 'यह आरक्षण आपका नहीं'; end if;
+  if public.sk_object_exists(p_storage_path) then
+    raise exception 'फ़ाइल चढ़ चुकी है — पहले उसे जोड़ें या "अधूरी फ़ाइल हटाएँ"';
+  end if;
+  perform set_config('sk.rpc', 'on', true);
+  update public.sk_receipt_slots set status = 'released' where id = s.id;
+  perform set_config('sk.rpc', 'off', true);
+end;
+$$;
+
+-- ---------- RPC: मेरे अधूरे अपलोड (recovery)
+create or replace function public.sk_my_open_slots()
+returns table (storage_path text, expense_id uuid, ref_no bigint, expires_at timestamptz, uploaded boolean)
+language sql stable security definer set search_path = ''
+as $$
+  select s.storage_path, s.expense_id, e.ref_no, s.expires_at, public.sk_object_exists(s.storage_path)
+  from public.sk_receipt_slots s join public.sk_expenses e on e.id = s.expense_id
+  where s.user_id = (select auth.uid()) and s.status = 'reserved' and public.sk_is_active()
+    and (s.expires_at > now() or public.sk_object_exists(s.storage_path))
+  order by s.created_at
+$$;
+revoke all on function public.sk_reserve_receipt_slot(uuid,text), public.sk_release_receipt_slot(text),
+  public.sk_my_open_slots() from public, anon;
+grant execute on function public.sk_reserve_receipt_slot(uuid,text), public.sk_release_receipt_slot(text),
+  public.sk_my_open_slots() to authenticated;
 
 -- ---------- RPC: रसीद जोड़ना (storage में असली फ़ाइल जाँचकर)
 create or replace function public.sk_attach_receipt(p_expense_id uuid, p_storage_path text, p_original_filename text)
@@ -692,8 +831,13 @@ begin
   end if;
   select id into v_id from public.sk_receipts where storage_path = p_storage_path;
   if v_id is not null then return v_id; end if;      -- retry सुरक्षित
+  -- फ़ाइल केवल अपने वैध (reserved) आरक्षण से जुड़ती है; जगह आरक्षण के समय ही गिनी जा चुकी है
+  perform 1 from public.sk_receipt_slots s
+   where s.storage_path = p_storage_path and s.user_id = v_uid and s.expense_id = p_expense_id
+     and s.status = 'reserved' for update;
+  if not found then raise exception 'इस फ़ाइल का वैध आरक्षण नहीं — पहले जगह आरक्षित करें'; end if;
   if (select count(*) from public.sk_receipts where expense_id = p_expense_id) >= 5 then
-    raise exception 'RECEIPT_LIMIT: एक खर्च में अधिकतम 5 रसीदें';
+    raise exception 'RECEIPT_LIMIT: एक खर्च में अधिकतम 5 रसीदें';   -- अतिरिक्त सुरक्षा
   end if;
   select ob.metadata into v_meta from storage.objects ob
    where ob.bucket_id = 'sk-receipts' and ob.name = p_storage_path
@@ -711,6 +855,9 @@ begin
   values (p_expense_id, p_storage_path, left(coalesce(nullif(btrim(p_original_filename), ''), 'file'), 255),
           v_mime, v_size, v_uid)
   returning id into v_id;
+  perform set_config('sk.rpc', 'on', true);
+  update public.sk_receipt_slots set status = 'attached' where storage_path = p_storage_path;
+  perform set_config('sk.rpc', 'off', true);
   -- रसीद जुड़ना भी बदलाव है: version +1 ताकि चल रहा सुधार पुराने संस्करण पर न हो
   select * into o from public.sk_expenses where id = p_expense_id;
   perform set_config('sk.rpc', 'on', true);
@@ -749,10 +896,17 @@ create policy "sk receipts upload" on storage.objects
     bucket_id = 'sk-receipts'
     and name ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f-]{36}\.(jpg|jpeg|png|webp|pdf|docx)$'
     and (storage.foldername(name))[1] = (select auth.uid())::text
-    and (select public.sk_can_attach(((storage.foldername(name))[2])::uuid))
-    and (select public.sk_upload_slot_free(((storage.foldername(name))[2])::uuid))
+    and (select public.sk_upload_allowed(name))     -- वैध आरक्षण के बिना कोई सीधा upload नहीं
   );
--- storage update/delete policy जानबूझकर नहीं: रसीद overwrite/delete नहीं।
+-- अधूरा अपलोड (आरक्षण 'reserved', रसीद नहीं जुड़ी) अपना या Admin हटा सकता है → फिर जगह छोड़ी जा सकती है।
+-- जुड़ी हुई रसीद कभी नहीं हटती; update (overwrite) policy जानबूझकर नहीं।
+drop policy if exists "sk delete unattached upload" on storage.objects;
+create policy "sk delete unattached upload" on storage.objects
+  for delete to authenticated using (
+    bucket_id = 'sk-receipts' and (select public.sk_unattached_deletable(name))
+  );
+-- पुराना folder-गिनती helper (e954e4c) अब उपयोग में नहीं
+drop function if exists public.sk_upload_slot_free(uuid);
 
 -- ============================================================================
 -- पहला Admin (SQL Editor में, अपने Auth user का UUID डालकर, एक बार):

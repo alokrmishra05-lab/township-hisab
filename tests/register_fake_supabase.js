@@ -83,7 +83,17 @@
       const e = S.sk_expenses.find(x => x.ref_no === a.p_ref_no); if (!e) return err('इस क्रमांक का खर्च नहीं मिला');
       (S.opens = S.opens || []).push({ user: me, expense: e.id });
       return { data: { expense: { ...e }, receipts: S.sk_receipts.filter(r => r.expense_id === e.id), history: S.sk_expense_audit.filter(h => h.expense_id === e.id) }, error: null }; },
-    sk_attach_receipt: a => { if (S.sk_receipts.filter(r => r.expense_id === a.p_expense_id).length >= 5) return err('RECEIPT_LIMIT: एक खर्च में अधिकतम 5 रसीदें');
+    sk_reserve_receipt_slot: a => {
+      S.slots = S.slots || [];
+      const used = S.sk_receipts.filter(r => r.expense_id === a.p_expense_id).length + S.slots.filter(s => s.expense_id === a.p_expense_id && s.status === 'reserved').length;
+      if (used >= 5) return err('RECEIPT_LIMIT: एक खर्च में अधिकतम 5 रसीदें (जुड़ी + चल रहे अपलोड)');
+      const path = `${me}/${a.p_expense_id}/${crypto.randomUUID()}.${a.p_ext}`;
+      S.slots.push({ storage_path: path, expense_id: a.p_expense_id, status: 'reserved', uploaded: false }); return { data: path, error: null }; },
+    sk_release_receipt_slot: a => { const s = (S.slots || []).find(x => x.storage_path === a.p_storage_path && x.status === 'reserved');
+      if (!s) return err('खुला आरक्षण नहीं मिला'); if (s.uploaded) return err('फ़ाइल चढ़ चुकी है'); s.status = 'released'; return { data: null, error: null }; },
+    sk_my_open_slots: () => ({ data: (S.slots || []).filter(s => s.status === 'reserved').map(s => ({ ...s, ref_no: (S.sk_expenses.find(e => e.id === s.expense_id) || {}).ref_no })), error: null }),
+    sk_attach_receipt: a => { const sl = (S.slots || []).find(x => x.storage_path === a.p_storage_path && x.status === 'reserved');
+      if (!sl) return err('इस फ़ाइल का वैध आरक्षण नहीं'); if (window.__FAIL_ATTACH) return err('नेटवर्क टूटा (परीक्षण)'); sl.status = 'attached';
       const r = { id: 'r' + (S.sk_receipts.length + 1), expense_id: a.p_expense_id, storage_path: a.p_storage_path, original_filename: a.p_original_filename, verification_status: 'pending', uploaded_by: me, created_at: now() };
       S.sk_receipts.push(r); logE(a.p_expense_id, 'receipt_attached'); return { data: r.id, error: null }; },
   };
@@ -93,7 +103,11 @@
     from,
     rpc: async (n, a = {}) => { calls.push(['rpc', n, a]); return rpc[n] ? rpc[n](a) : err('unknown rpc'); },
     storage: { from: () => ({
-      upload: async (path, file, o) => { calls.push(['upload', path, o.contentType]); return has('write') || has('correct') ? { error: null } : { error: { message: 'new row violates row-level security policy' } }; },
+      upload: async (path, file, o) => { calls.push(['upload', path, o.contentType]);
+        const sl = (S.slots || []).find(x => x.storage_path === path && x.status === 'reserved');
+        if (window.__FAIL_UPLOAD || !sl) return { error: { message: window.__FAIL_UPLOAD ? 'नेटवर्क टूटा (परीक्षण)' : 'new row violates row-level security policy' } };
+        sl.uploaded = true; return { error: null }; },
+      remove: async paths => { calls.push(['remove', paths]); paths.forEach(p => { const sl = (S.slots || []).find(x => x.storage_path === p && x.status === 'reserved'); if (sl) sl.uploaded = false; }); return { error: null }; },
       createSignedUrl: async () => ({ data: { signedUrl: 'about:blank' }, error: null }),
     }) },
     functions: { invoke: async (n, o) => { calls.push(['invoke', n, o.body]); return { data: { status: 'verified' }, error: null }; } },

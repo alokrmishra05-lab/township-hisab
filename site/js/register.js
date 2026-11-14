@@ -135,6 +135,7 @@ async function refresh() {
   $('summaryCard').hidden = !r.read;
   if (tab === 'register') await loadRegister();
   if (tab === 'members') await loadMembers();
+  await loadOpenSlots();
 }
 
 // ---------- खर्च जोड़ना
@@ -152,19 +153,46 @@ async function prepareFiles(list) {
   return out;
 }
 
+// हर फ़ाइल: (1) server पर जगह आरक्षित → path  (2) उसी path पर upload  (3) attach।
+// upload विफल हो तो जगह तुरंत छोड़ी जाती है; attach विफल हो तो फ़ाइल "अधूरे अपलोड" में दिखती है।
 async function uploadReceipts(expenseId, files) {
   let ok = 0;
   for (const { file, mime, ext } of files) {
-    const path = `${user.id}/${expenseId}/${crypto.randomUUID()}.${ext}`;
+    const { data: path, error: rErr } = await db.rpc('sk_reserve_receipt_slot', { p_expense_id: expenseId, p_ext: ext });
+    if (rErr) throw Error(`"${file.name}": ${errText(rErr)}`);
     const { error: upErr } = await db.storage.from(BUCKET).upload(path, file, { upsert: false, contentType: mime, cacheControl: '0' });
-    if (upErr) throw Error(`"${file.name}" अपलोड नहीं हुई: ` + (/row-level security/i.test(upErr.message || '')
-      ? 'इस खर्च में 5 फ़ाइलें पहले से हैं या अधिकार नहीं।' : errText(upErr)));
+    if (upErr) {
+      await db.rpc('sk_release_receipt_slot', { p_storage_path: path });   // फ़ाइल नहीं चढ़ी: जगह वापस
+      throw Error(`"${file.name}" अपलोड नहीं हुई: ${errText(upErr)} — उसकी जगह वापस कर दी गई।`);
+    }
     const { data: rid, error: aErr } = await db.rpc('sk_attach_receipt', { p_expense_id: expenseId, p_storage_path: path, p_original_filename: file.name.slice(0, 255) });
-    if (aErr) throw Error(`"${file.name}" खर्च से नहीं जुड़ी: ${errText(aErr)}`);
+    if (aErr) throw Error(`"${file.name}" चढ़ गई पर खर्च से नहीं जुड़ी: ${errText(aErr)} — ऊपर "अधूरे अपलोड" से जोड़ें या हटाएँ।`);
     ok++;
     db.functions.invoke('verify-receipt', { body: { receipt_id: rid } }).catch(() => {}); // जाँच server पर; विफलता से एंट्री नहीं रुकती
   }
   return ok;
+}
+
+// ---------- अधूरे अपलोड (अपने): जोड़ें / हटाएँ / जगह छोड़ें
+async function loadOpenSlots() {
+  const box = $('openSlots');
+  const { data, error } = await db.rpc('sk_my_open_slots');
+  if (error || !data?.length) { box.hidden = true; box.innerHTML = ''; return; }
+  box.hidden = false;
+  box.innerHTML = `<b>अधूरे अपलोड (${data.length})</b><small>ये जगहें घिरी हैं (प्रति खर्च अधिकतम 5)। फ़ाइल चढ़ चुकी हो तो जोड़ें या हटाएँ; न चढ़ी हो तो जगह छोड़ें।</small>` +
+    data.map(s => `<div class="row" style="margin-top:8px"><span>${ref(s.ref_no)} · ${s.uploaded ? 'फ़ाइल चढ़ी, जुड़ी नहीं' : 'फ़ाइल नहीं चढ़ी'}</span>
+      ${s.uploaded ? `<button type="button" class="secondary slotAttach" data-p="${esc(s.storage_path)}" data-e="${esc(s.expense_id)}">जोड़ें</button>
+        <button type="button" class="secondary slotDelete" data-p="${esc(s.storage_path)}">हटाएँ</button>`
+      : `<button type="button" class="secondary slotRelease" data-p="${esc(s.storage_path)}">जगह छोड़ें</button>`}</div>`).join('');
+  const act = async (fn, okMsg) => { setBusy(true); try { await fn(); show(okMsg, 'success'); } catch (e) { show(errText(e), 'error'); } finally { setBusy(false); await loadOpenSlots(); } };
+  box.querySelectorAll('.slotAttach').forEach(b => b.onclick = () => act(async () => {
+    const { error } = await db.rpc('sk_attach_receipt', { p_expense_id: b.dataset.e, p_storage_path: b.dataset.p, p_original_filename: 'अधूरा अपलोड' });
+    if (error) throw error; }, 'अधूरी फ़ाइल खर्च से जुड़ गई।'));
+  box.querySelectorAll('.slotDelete').forEach(b => b.onclick = () => act(async () => {
+    const { error } = await db.storage.from(BUCKET).remove([b.dataset.p]); if (error) throw error;
+    const { error: e2 } = await db.rpc('sk_release_receipt_slot', { p_storage_path: b.dataset.p }); if (e2) throw e2; }, 'अधूरी फ़ाइल हटाई, जगह वापस।'));
+  box.querySelectorAll('.slotRelease').forEach(b => b.onclick = () => act(async () => {
+    const { error } = await db.rpc('sk_release_receipt_slot', { p_storage_path: b.dataset.p }); if (error) throw error; }, 'जगह वापस।'));
 }
 
 async function addExpense(e) {

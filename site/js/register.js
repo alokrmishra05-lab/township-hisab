@@ -29,7 +29,7 @@ async function adminCall(body) {
   return data;
 }
 
-let db, user, me, busy = false, rows = [], receiptsByExp = new Map(), tab = null;
+let db, user, me, busy = false, rows = [], receiptsByExp = new Map(), tab = null, tabKeys = [];
 
 function show(text, type = '') {
   const m = $('message'); m.hidden = false; m.className = 'notice ' + type; m.textContent = text;
@@ -110,7 +110,33 @@ function init() {
   $('listReceipts').onclick = listAllReceipts;
   $('openBtn').onclick = () => openByRef($('openRef').value);
   $('openRef').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); openByRef($('openRef').value); } });
+  enableSwipe();
   refresh().catch(e => show('सेवा से संपर्क नहीं हुआ: ' + errText(e), 'error'));
+}
+
+// ---------- बाएँ/दाएँ swipe से टैब बदलना (फ़ॉर्म, खिसकने वाली तालिका या खुले संवाद पर नहीं)
+function scrollsSideways(el) {
+  for (let n = el; n && n !== document.body; n = n.parentElement) {
+    if (n.scrollWidth > n.clientWidth + 2 && /(auto|scroll)/.test(getComputedStyle(n).overflowX)) return true;
+  }
+  return false;
+}
+function enableSwipe() {
+  let x0 = null, y0 = 0, t0 = 0;
+  const area = $('workspace');
+  area.addEventListener('touchstart', e => {
+    const t = e.target;
+    if (e.touches.length !== 1 || !$('modal').hidden || busy || t.closest('input, textarea, select, .tabs') || scrollsSideways(t)) { x0 = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now();
+  }, { passive: true });
+  area.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; x0 = null;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || Date.now() - t0 > 700) return;
+    const i = tabKeys.indexOf(tab), j = dx < 0 ? i + 1 : i - 1;   // बाएँ swipe = अगला टैब
+    if (i < 0 || j < 0 || j >= tabKeys.length) return;
+    tab = tabKeys[j]; window.scrollTo({ top: 0 }); refresh();
+  }, { passive: true });
 }
 
 // हर बड़े कदम पर सदस्यता/अधिकार database से ताज़ा पढ़ें (Admin के बदलाव तुरंत लागू)
@@ -144,7 +170,9 @@ async function refreshInner() {
     me.is_admin && ['members', 'सदस्य'], me.is_admin && ['export', 'CSV / समापन']].filter(Boolean);
   if (!tabs.some(t => t[0] === tab)) tab = tabs[0]?.[0] || null;
   $('tabs').innerHTML = tabs.map(([k, t]) => `<button type="button" data-t="${k}" class="${k === tab ? 'on' : ''}">${t}</button>`).join('');
+  tabKeys = tabs.map(t => t[0]);
   $('tabs').querySelectorAll('button').forEach(b => b.onclick = () => { tab = b.dataset.t; refresh(); });
+  $('tabs').querySelector('button.on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
   ['hisab', 'add', 'register', 'members', 'export'].forEach(v => $('v-' + v).hidden = v !== tab);
   if (!tabs.length) show('आपके पास अभी कोई अधिकार नहीं है। Admin से संपर्क करें।', 'error');
   $('summaryCard').hidden = !r.read;

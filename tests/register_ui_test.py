@@ -275,6 +275,32 @@ with sync_playwright() as p:
     check('थीम बटन लॉगिन पेज पर भी', pg2.is_visible('#themeBtn'))
     check('थीम में JS त्रुटि नहीं', not errs and not errs2, str(errs + errs2))
 
+    # swipe से टैब बदलना
+    pg, errs = open_as(p, 'admin')
+    def swipe(sel, dx, dy=0):
+        pg.evaluate("""([sel, dx, dy]) => { const el = document.querySelector(sel), r = el.getBoundingClientRect();
+          const x = r.left + r.width / 2, y = r.top + Math.min(r.height / 2, 200);
+          const mk = (cx, cy) => new Touch({ identifier: 1, target: el, clientX: cx, clientY: cy });
+          el.dispatchEvent(new TouchEvent('touchstart', { touches: [mk(x, y)], changedTouches: [mk(x, y)], bubbles: true }));
+          el.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [mk(x + dx, y + dy)], bubbles: true })); }""", [sel, dx, dy])
+        pg.wait_for_timeout(500)
+    cur = lambda: pg.locator('#tabs button.on').get_attribute('data-t')
+    swipe('#hisabBox', -150)
+    check('बाएँ swipe → अगला टैब (कुल हिसाब → खर्च जोड़ें)', cur() == 'add', cur())
+    swipe('#v-add h2', -150)
+    check('फिर बाएँ swipe → रजिस्टर', cur() == 'register', cur())
+    swipe('#listCard h2', 150)
+    check('दाएँ swipe → पिछला टैब (खर्च जोड़ें)', cur() == 'add', cur())
+    swipe('#fItem', -150)
+    check('फ़ॉर्म के खाने पर swipe से टैब नहीं बदलता', cur() == 'add', cur())
+    swipe('#v-add h2', -40, 0)
+    check('छोटा खिसकाव (40px) टैब नहीं बदलता', cur() == 'add', cur())
+    swipe('#v-add h2', -150, 200)
+    check('ऊपर-नीचे scroll जैसा खिसकाव टैब नहीं बदलता', cur() == 'add', cur())
+    swipe('#v-add h2', 150); swipe('#hisabBox', 150)
+    check('पहले टैब पर दाएँ swipe → वहीं रहता है', cur() == 'hisab', cur())
+    check('swipe में JS त्रुटि नहीं', not errs, str(errs))
+
     # Dark + desktop
     pg, errs = open_as(p, 'admin', 1280, 900, dark=True)
     pg.click('#tabs button[data-t="register"]'); pg.wait_for_timeout(400)

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14532d">
+<script src="js/theme.js"></script>
 <meta name="referrer" content="no-referrer">
 <title>सूर्य कुंज हिसाब-किताब</title>
 <link rel="manifest" href="manifest.json">
@@ -13,7 +14,11 @@
 <style>
 :root{--bg:#f6f5f0;--card:#fff;--ink:#1c1f1a;--muted:#646b61;--line:#e3e5de;--brand:#14532d;--brand-soft:#e7f1ea;
   --warn-bg:#fff4da;--warn-line:#efd497;--err-bg:#ffeded;--err-line:#f0b6b6;--ok-bg:#e7f7eb;--ok-line:#a7d6b4;--field:#fff;--field-line:#ccd5c8}
-@media (prefers-color-scheme:dark){:root{--bg:#111410;--card:#1a1e19;--ink:#eef0ea;--muted:#9aa093;--line:#2b3029;--brand:#4ade80;--brand-soft:#1d2b21;
+/* थीम: data-theme=light/dark हाथ से चुना; न हो (Auto) तो फ़ोन/सिस्टम की सेटिंग */
+:root{color-scheme:light}
+:root[data-theme=dark]{color-scheme:dark;--bg:#111410;--card:#1a1e19;--ink:#eef0ea;--muted:#9aa093;--line:#2b3029;--brand:#4ade80;--brand-soft:#1d2b21;
+  --warn-bg:#3a2f12;--warn-line:#6b5420;--err-bg:#3b1717;--err-line:#7a2e2e;--ok-bg:#16301d;--ok-line:#2f6b3e;--field:#141813;--field-line:#394036}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;--bg:#111410;--card:#1a1e19;--ink:#eef0ea;--muted:#9aa093;--line:#2b3029;--brand:#4ade80;--brand-soft:#1d2b21;
   --warn-bg:#3a2f12;--warn-line:#6b5420;--err-bg:#3b1717;--err-line:#7a2e2e;--ok-bg:#16301d;--ok-line:#2f6b3e;--field:#141813;--field-line:#394036}}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans Devanagari",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
@@ -29,7 +34,8 @@ input,select,textarea{font:inherit;font-size:16px;width:100%;border:1px solid va
 textarea{min-height:68px;resize:vertical}input[type=file]{font-size:14px;padding:9px}
 input[type=checkbox]{width:auto;min-height:auto}
 button{font:inherit;font-weight:600;font-size:15px;background:var(--brand);border:0;color:#fff;border-radius:10px;padding:10px 15px;cursor:pointer;min-height:44px}
-@media (prefers-color-scheme:dark){button{color:#0b1a10}}
+:root[data-theme=dark] button{color:#0b1a10}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) button{color:#0b1a10}}
 button:disabled{opacity:.55;cursor:wait}
 .secondary{background:var(--brand-soft);color:var(--brand)!important}
 .danger{background:#b42318;color:#fff!important}
@@ -68,11 +74,12 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .spin{width:22px;height:22px;border:3px solid var(--line,#ccc);border-top-color:currentColor;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
+.hdr-actions{display:flex;gap:8px;align-items:center}.theme-btn{padding:8px 12px;font-size:14px;white-space:nowrap}
 </style>
 </head>
 <body>
 <main>
-<header><div class="brand"><img src="icons/icon-192.png" alt="" width="44" height="44"><div><b>सूर्य कुंज</b><small>आवासीय योजना</small></div></div><button id="signOut" class="secondary" hidden>लॉगआउट</button></header>
+<header><div class="brand"><img src="icons/icon-192.png" alt="" width="44" height="44"><div><b>सूर्य कुंज</b><small>आवासीय योजना</small></div></div><div class="hdr-actions"><button id="themeBtn" type="button" class="secondary theme-btn" aria-label="थीम बदलें" title="थीम बदलें">◐ Auto</button><button id="signOut" class="secondary" hidden>लॉगआउट</button></div></header>
 <h1>हिसाब-किताब</h1><div class="sub">निवेश और खर्च एक जगह · केवल सदस्यों के लिए</div>
 <div id="boot" class="boot" role="status"><span class="spin"></span>खुल रहा है…</div>
 <div id="setup" class="notice" hidden>यह सुविधा अभी चालू नहीं है। Admin को अलग Surya Kunj Supabase सेटअप पूरा करना है (EXPENSE-REGISTER.md)।</div>

@@ -259,6 +259,22 @@ with sync_playwright() as p:
     pg, errs = open_as(p, 'writer')
     check('केवल-Write (सहायक) को "कुल हिसाब" टैब नहीं', 'कुल हिसाब' not in pg.inner_text('#tabs'))
 
+    # थीम: Auto → Light → Dark → Auto (फ़ोन dark पर)
+    pg, errs = open_as(p, 'admin', dark=True)
+    bg = lambda: pg.evaluate("getComputedStyle(document.body).backgroundColor")
+    check('थीम: शुरू में Auto, फ़ोन dark → गहरा रंग', pg.evaluate("document.documentElement.getAttribute('data-theme')") is None and bg() == 'rgb(17, 20, 16)' and 'Auto' in pg.inner_text('#themeBtn'), bg())
+    pg.click('#themeBtn'); pg.wait_for_timeout(100)
+    check('थीम: Light चुनने पर फ़ोन dark होते हुए भी हल्का रंग', pg.evaluate("document.documentElement.dataset.theme") == 'light' and bg() == 'rgb(246, 245, 240)' and 'Light' in pg.inner_text('#themeBtn'), bg())
+    pg.click('#themeBtn'); pg.wait_for_timeout(100)
+    check('थीम: Dark', pg.evaluate("document.documentElement.dataset.theme") == 'dark' and bg() == 'rgb(17, 20, 16)')
+    pg.reload(); pg.wait_for_timeout(700)
+    check('थीम: पसंद reload के बाद भी याद (Dark)', pg.evaluate("document.documentElement.dataset.theme") == 'dark' and 'Dark' in pg.inner_text('#themeBtn'))
+    pg.click('#themeBtn'); pg.wait_for_timeout(100)
+    check('थीम: फिर Auto', pg.evaluate("document.documentElement.getAttribute('data-theme')") is None and 'Auto' in pg.inner_text('#themeBtn'))
+    pg2, errs2 = open_as(p, 'loggedout')
+    check('थीम बटन लॉगिन पेज पर भी', pg2.is_visible('#themeBtn'))
+    check('थीम में JS त्रुटि नहीं', not errs and not errs2, str(errs + errs2))
+
     # Dark + desktop
     pg, errs = open_as(p, 'admin', 1280, 900, dark=True)
     pg.click('#tabs button[data-t="register"]'); pg.wait_for_timeout(400)

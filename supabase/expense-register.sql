@@ -10,7 +10,9 @@
 --   Admin (केवल एक, SQL Editor से तय) : सब कुछ; सदस्यों को मंज़ूर/अस्वीकार/हटाए; अधिकार दे/ले
 --   Read    : खर्च सूची, फ़िल्टर, महीने व श्रेणी के कुल, बदलाव का इतिहास
 --   Write   : नया खर्च और उसकी रसीद जोड़ना (पुराना बदलना नहीं)
---   सुधार   : खर्च सुधारना/कारण देकर रद्द करना; सभी खर्च और उनकी रसीदें देखना
+--   सुधार   : सभी खर्चों पर लागू — किसी भी खर्च को उसके क्रमांक (SK-…) से खोलकर सुधारना/
+--             कारण देकर रद्द करना, उसकी रसीद देखना/जोड़ना। पूरी सूची, कुल और फ़िल्टर नहीं
+--             (उसके लिए Read अलग से)।
 --   हर सक्रिय सदस्य: अपनी अपलोड की हुई रसीद देख सकता है
 --   Pending / अस्वीकृत / हटाया गया: कुछ नहीं
 -- अधिकार हर कार्रवाई पर database से दोबारा पढ़े जाते हैं — लॉगिन रहते भी बदलाव तुरंत लागू।
@@ -332,9 +334,10 @@ grant select on public.sk_expenses to authenticated;
 -- जोड़ना/सुधार/रद्द केवल RPC से (कोई insert/update/delete grant नहीं)
 
 drop policy if exists "sk read or correct sees expenses" on public.sk_expenses;
-create policy "sk read or correct sees expenses" on public.sk_expenses
-  for select to authenticated
-  using ((select public.sk_has('read')) or (select public.sk_has('correct')));
+drop policy if exists "sk read sees expenses" on public.sk_expenses;
+-- पूरी सूची केवल Read से। केवल-सुधार वाला सदस्य एक-एक खर्च sk_open_for_correction से खोलता है।
+create policy "sk read sees expenses" on public.sk_expenses
+  for select to authenticated using ((select public.sk_has('read')));
 
 create or replace function public.sk_expenses_guard()
 returns trigger language plpgsql set search_path = ''
@@ -380,8 +383,7 @@ revoke all on public.sk_expense_audit from public, anon, authenticated, service_
 grant select on public.sk_expense_audit to authenticated;
 drop policy if exists "sk readers see expense history" on public.sk_expense_audit;
 create policy "sk readers see expense history" on public.sk_expense_audit
-  for select to authenticated
-  using ((select public.sk_has('read')) or (select public.sk_has('correct')));
+  for select to authenticated using ((select public.sk_has('read')));
 drop trigger if exists sk_expense_audit_block on public.sk_expense_audit;
 create trigger sk_expense_audit_block before update or delete on public.sk_expense_audit
   for each row execute function public.sk_block_change();
@@ -483,6 +485,50 @@ begin
 end;
 $$;
 
+-- ---------- RPC: सुधार हेतु एक खर्च खोलना (क्रमांक से) — खर्च, उसकी रसीदें, इतिहास
+-- सुधार अधिकार सभी खर्चों पर लागू है, इसलिए कोई भी क्रमांक खुल सकता है; पर सूची/कुल नहीं मिलते।
+-- हर "खोलना" दर्ज होता है; इसी से 10 मिनट के लिए उस खर्च की रसीद (storage) खुलती है।
+create table if not exists public.sk_correction_opens (
+  id         bigint generated always as identity primary key,
+  user_id    uuid not null references auth.users(id),
+  expense_id uuid not null references public.sk_expenses(id),
+  opened_at  timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '10 minutes'
+);
+create index if not exists sk_correction_opens_idx on public.sk_correction_opens(user_id, expense_id, expires_at);
+alter table public.sk_correction_opens enable row level security;
+revoke all on public.sk_correction_opens from public, anon, authenticated, service_role;
+grant select on public.sk_correction_opens to authenticated;
+drop policy if exists "sk admin sees correction opens" on public.sk_correction_opens;
+create policy "sk admin sees correction opens" on public.sk_correction_opens
+  for select to authenticated using ((select public.sk_is_admin()));
+drop trigger if exists sk_correction_opens_block on public.sk_correction_opens;
+create trigger sk_correction_opens_block before update or delete on public.sk_correction_opens
+  for each row execute function public.sk_block_change();
+
+create or replace function public.sk_open_for_correction(p_ref_no bigint)
+returns jsonb language plpgsql volatile security definer set search_path = ''
+as $$
+declare e public.sk_expenses%rowtype;
+begin
+  if not public.sk_has('correct') then raise exception 'सुधार का अधिकार नहीं'; end if;
+  select * into e from public.sk_expenses where ref_no = p_ref_no;
+  if not found then raise exception 'इस क्रमांक का खर्च नहीं मिला'; end if;
+  insert into public.sk_correction_opens(user_id, expense_id) values (auth.uid(), e.id);
+  return jsonb_build_object(
+    'expense', to_jsonb(e),
+    'receipts', coalesce((select jsonb_agg(jsonb_build_object('id', r.id, 'storage_path', r.storage_path,
+        'original_filename', r.original_filename, 'verification_status', r.verification_status,
+        'verification_note', r.verification_note) order by r.created_at)
+      from public.sk_receipts r where r.expense_id = e.id), '[]'::jsonb),
+    'history', coalesce((select jsonb_agg(jsonb_build_object('action', a.action, 'actor_name', a.actor_name,
+        'at', a.at, 'reason', a.reason, 'old_data', a.old_data, 'new_data', a.new_data) order by a.at)
+      from public.sk_expense_audit a where a.expense_id = e.id), '[]'::jsonb));
+end;
+$$;
+revoke all on function public.sk_open_for_correction(bigint) from public, anon;
+grant execute on function public.sk_open_for_correction(bigint) to authenticated;
+
 -- ---------- RPC: फ़िल्टर सहित कुल (Read) — केवल सक्रिय खर्च; राशि text में (सटीक)
 create or replace function public.sk_summary(
   p_from date default null, p_to date default null, p_category text default null, p_payer text default null
@@ -548,8 +594,9 @@ drop policy if exists "sk receipts by role" on public.sk_receipts;
 create policy "sk receipts by role" on public.sk_receipts
   for select to authenticated using (
     (select public.sk_is_admin())
-    or (select public.sk_has('correct'))
     or (uploaded_by = (select auth.uid()) and (select public.sk_is_active()))
+    -- Read + सुधार दोनों: सूची के साथ रसीदें। केवल-सुधार: sk_open_for_correction से एक खर्च की।
+    or ((select public.sk_has('read')) and (select public.sk_has('correct')))
   );
 
 create or replace function public.sk_receipts_guard()
@@ -598,14 +645,33 @@ as $$
       and ((e.created_by = (select auth.uid()) and public.sk_has('write')) or public.sk_has('correct'))
   )
 $$;
+-- रसीद फ़ाइल (storage) कौन खोल सकता है — स्वयं-अपलोड के अलावा:
+--   Admin: सभी जुड़ी रसीदें · Read+सुधार: सभी जुड़ी रसीदें (सूची के साथ)
+--   केवल-सुधार: वही खर्च जिसे पिछले 10 मिनट में sk_open_for_correction से खोला हो
 create or replace function public.sk_receipt_visible(p_path text)
 returns boolean language sql stable security definer set search_path = ''
 as $$
-  select exists (select 1 from public.sk_receipts r where r.storage_path = p_path)
-     and (public.sk_is_admin() or public.sk_has('correct'))
+  select exists (
+    select 1 from public.sk_receipts r
+    where r.storage_path = p_path and (
+      public.sk_is_admin()
+      or (public.sk_has('read') and public.sk_has('correct'))
+      or (public.sk_has('correct') and exists (
+            select 1 from public.sk_correction_opens o
+            where o.user_id = (select auth.uid()) and o.expense_id = r.expense_id and o.expires_at > now()))
+    )
+  )
 $$;
-revoke all on function public.sk_can_attach(uuid), public.sk_receipt_visible(text) from public, anon;
-grant execute on function public.sk_can_attach(uuid), public.sk_receipt_visible(text) to authenticated;
+create or replace function public.sk_upload_slot_free(p_expense uuid)
+returns boolean language sql stable security definer set search_path = ''
+as $$
+  select (select count(*) from storage.objects ob
+          where ob.bucket_id = 'sk-receipts' and (storage.foldername(ob.name))[2] = p_expense::text) < 5
+$$;
+revoke all on function public.sk_can_attach(uuid), public.sk_receipt_visible(text),
+  public.sk_upload_slot_free(uuid) from public, anon;
+grant execute on function public.sk_can_attach(uuid), public.sk_receipt_visible(text),
+  public.sk_upload_slot_free(uuid) to authenticated;
 
 -- ---------- RPC: रसीद जोड़ना (storage में असली फ़ाइल जाँचकर)
 create or replace function public.sk_attach_receipt(p_expense_id uuid, p_storage_path text, p_original_filename text)
@@ -618,6 +684,8 @@ begin
   if not public.sk_can_attach(p_expense_id) then
     raise exception 'इस खर्च में रसीद जोड़ने का अधिकार नहीं (अपना खर्च + Write, या सुधार अधिकार)';
   end if;
+  -- एक ही खर्च पर साथ-साथ चल रहे attach को क्रम में लाता है, ताकि 5 की गिनती सटीक रहे
+  perform 1 from public.sk_expenses where id = p_expense_id for update;
   if p_storage_path !~ ('^' || v_uid::text || '/' || p_expense_id::text
                         || '/[0-9a-f-]{36}\.(jpg|jpeg|png|webp|pdf|docx)$') then
     raise exception 'फ़ाइल का path मान्य नहीं';
@@ -625,7 +693,7 @@ begin
   select id into v_id from public.sk_receipts where storage_path = p_storage_path;
   if v_id is not null then return v_id; end if;      -- retry सुरक्षित
   if (select count(*) from public.sk_receipts where expense_id = p_expense_id) >= 5 then
-    raise exception 'एक खर्च में अधिकतम 5 रसीदें';
+    raise exception 'RECEIPT_LIMIT: एक खर्च में अधिकतम 5 रसीदें';
   end if;
   select ob.metadata into v_meta from storage.objects ob
    where ob.bucket_id = 'sk-receipts' and ob.name = p_storage_path
@@ -682,6 +750,7 @@ create policy "sk receipts upload" on storage.objects
     and name ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}/[0-9a-f-]{36}\.(jpg|jpeg|png|webp|pdf|docx)$'
     and (storage.foldername(name))[1] = (select auth.uid())::text
     and (select public.sk_can_attach(((storage.foldername(name))[2])::uuid))
+    and (select public.sk_upload_slot_free(((storage.foldername(name))[2])::uuid))
   );
 -- storage update/delete policy जानबूझकर नहीं: रसीद overwrite/delete नहीं।
 

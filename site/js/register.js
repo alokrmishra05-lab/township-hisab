@@ -21,6 +21,7 @@ function show(text, type = '') {
 }
 const errText = e => {
   const msg = String(e?.message || e || 'अज्ञात त्रुटि');
+  if (/RECEIPT_LIMIT/.test(msg)) return 'इस खर्च में रसीद नहीं जुड़ सकती — अधिकतम 5 रसीदें हो चुकी हैं या अधिकार नहीं।';
   if (/VERSION_CHANGED/.test(msg)) return 'आपके देखने के बाद यह खर्च बदला गया। सूची रिफ्रेश कर दी है — दोबारा देखें।';
   if (/failed to fetch|network/i.test(msg)) return 'इंटरनेट/सेवा से संपर्क नहीं हुआ। दोबारा कोशिश करें।';
   if (/invalid login/i.test(msg)) return 'ईमेल या पासवर्ड गलत है।';
@@ -95,6 +96,8 @@ function init() {
   $('clearFilter').onclick = () => { ['qFrom', 'qTo', 'qPayer'].forEach(i => $(i).value = ''); $('qCategory').value = ''; loadRegister(); };
   $('csvExpenses').onclick = exportExpenses; $('csvAudit').onclick = exportAudit; $('csvMembers').onclick = exportMembers;
   $('listReceipts').onclick = listAllReceipts;
+  $('openBtn').onclick = () => openByRef($('openRef').value);
+  $('openRef').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); openByRef($('openRef').value); } });
   refresh().catch(e => show('सेवा से संपर्क नहीं हुआ: ' + errText(e), 'error'));
 }
 
@@ -154,7 +157,8 @@ async function uploadReceipts(expenseId, files) {
   for (const { file, mime, ext } of files) {
     const path = `${user.id}/${expenseId}/${crypto.randomUUID()}.${ext}`;
     const { error: upErr } = await db.storage.from(BUCKET).upload(path, file, { upsert: false, contentType: mime, cacheControl: '0' });
-    if (upErr) throw Error(`"${file.name}" अपलोड नहीं हुई: ${errText(upErr)}`);
+    if (upErr) throw Error(`"${file.name}" अपलोड नहीं हुई: ` + (/row-level security/i.test(upErr.message || '')
+      ? 'इस खर्च में 5 फ़ाइलें पहले से हैं या अधिकार नहीं।' : errText(upErr)));
     const { data: rid, error: aErr } = await db.rpc('sk_attach_receipt', { p_expense_id: expenseId, p_storage_path: path, p_original_filename: file.name.slice(0, 255) });
     if (aErr) throw Error(`"${file.name}" खर्च से नहीं जुड़ी: ${errText(aErr)}`);
     ok++;
@@ -180,7 +184,7 @@ async function addExpense(e) {
     let msg = `${ref(added.ref_no)} सहेजा गया: ${rupee(paise)}।`;
     if (files.length) {
       try { msg += ` ${await uploadReceipts(added.id, files)} रसीद जुड़ी।`; }
-      catch (err) { show(`${msg}\nपर रसीद पूरी नहीं जुड़ी — ${err.message}\nखर्च सुरक्षित है; सुधार-अधिकार वाले सदस्य/Admin बाद में रसीद जोड़ सकते हैं।`, 'error'); return; }
+      catch (err) { show(`${msg}\nपर रसीद पूरी नहीं जुड़ी — ${err.message}\nखर्च सुरक्षित है; सुधार-अधिकार वाला सदस्य या Admin "रसीद जोड़ें" से बाद में जोड़ सकता है।`, 'error'); return; }
     }
     $('addForm').reset(); $('fDate').value = todayIST();
     $('addedList').insertAdjacentHTML('afterbegin', `<div>✓ ${esc(msg)}</div>`);
@@ -192,7 +196,41 @@ async function addExpense(e) {
 const filters = () => ({ from: $('qFrom').value || null, to: $('qTo').value || null,
   cat: $('qCategory').value || null, payer: $('qPayer').value.trim() || null });
 
+const RC = { verified: ['', 'जाँची ✓'], rejected: ['b-no', 'अमान्य'], pending: ['b-warn', 'जाँच बाकी'] };
+function card(r, recs, canCorrect, histHtml = null) {
+  const rec = recs.map(p => `<button type="button" class="secondary rcBtn" data-path="${esc(p.storage_path)}" style="margin:6px 6px 0 0">📎 ${esc(p.original_filename)}</button>` +
+    `<span class="badge ${RC[p.verification_status][0]}">${RC[p.verification_status][1]}</span>`).join(' ');
+  const slots = 5 - recs.length;
+  return `<div class="item ${r.status}" id="it-${esc(r.id)}">
+    <div class="row"><b>${esc(r.item)}</b><span class="amount">${rupee(r.amount)}</span></div>
+    ${r.status === 'cancelled' ? `<span class="badge b-no">रद्द</span> <small>कारण: ${esc(r.cancel_reason)}</small>` : ''}
+    <span class="ref">${ref(r.ref_no)} · ${esc(r.expense_date)} · ${esc(r.category)} · ${esc(r.payer)} · ${esc(r.payment_method)}</span>
+    <small>दर्ज: ${esc(r.created_by_name)}, ${when(r.created_at)}${r.updated_by_name && r.updated_at !== r.created_at ? ` · अंतिम बदलाव: ${esc(r.updated_by_name)}, ${when(r.updated_at)}` : ''}</small>
+    <div>${rec}</div>
+    <div class="row" style="margin-top:8px">
+      ${canCorrect && r.status === 'active' ? `<button type="button" class="secondary fixBtn" data-id="${esc(r.id)}">सुधारें</button>
+        <button type="button" class="secondary cancelBtn" data-id="${esc(r.id)}">रद्द करें</button>
+        ${slots > 0 ? `<button type="button" class="secondary addRcBtn" data-id="${esc(r.id)}" data-n="${recs.length}">रसीद जोड़ें (${recs.length}/5)</button>` : '<small>5/5 रसीदें — सीमा पूरी</small>'}` : ''}
+      ${histHtml === null ? `<button type="button" class="secondary histBtn" data-id="${esc(r.id)}" style="flex:0 0 auto">इतिहास</button>` : ''}
+    </div><div class="audit" id="au-${esc(r.id)}"${histHtml === null ? ' hidden' : ''}>${histHtml ?? ''}</div></div>`;
+}
+function bindCards(list) {
+  const find = id => list.find(x => x.id === id);
+  document.querySelectorAll('.rcBtn').forEach(b => b.onclick = () => openReceipt(b));
+  document.querySelectorAll('.fixBtn').forEach(b => b.onclick = () => correctDialog(find(b.dataset.id)));
+  document.querySelectorAll('.cancelBtn').forEach(b => b.onclick = () => cancelDialog(find(b.dataset.id)));
+  document.querySelectorAll('.histBtn').forEach(b => b.onclick = () => toggleHistory(b.dataset.id));
+  document.querySelectorAll('.addRcBtn').forEach(b => b.onclick = () => addReceiptDialog(find(b.dataset.id), Number(b.dataset.n)));
+}
+const canRead = () => me.is_admin || me.can_read;
+const canCorrect = () => me.is_admin || me.can_correct;
+
 async function loadRegister() {
+  // पूरी सूची/कुल/फ़िल्टर केवल Read से; केवल-सुधार वाला क्रमांक से एक खर्च खोलता है
+  $('openBox').hidden = canRead() || !canCorrect();
+  $('filterCard').hidden = $('listCard').hidden = $('summaryCard').hidden = !canRead();
+  openedRef = null;
+  if (!canRead()) return;
   const f = filters();
   let qy = db.from('sk_expenses').select('id,ref_no,expense_date,item,category,amount,payer,payment_method,status,version,created_by,created_by_name,created_at,updated_by_name,updated_at,cancel_reason,cancelled_at')
     .order('expense_date', { ascending: false }).order('ref_no', { ascending: false }).limit(2000);
@@ -202,29 +240,36 @@ async function loadRegister() {
   if (error) { show('रजिस्टर नहीं खुला: ' + errText(error), 'error'); return; }
   rows = data || [];
   receiptsByExp = new Map(); (rc || []).forEach(r => { if (!receiptsByExp.has(r.expense_id)) receiptsByExp.set(r.expense_id, []); receiptsByExp.get(r.expense_id).push(r); });
-  if (me.is_admin || me.can_read) await loadSummary(f);
-  const canCorrect = me.is_admin || me.can_correct;
+  await loadSummary(f);
   $('listTitle').textContent = `खर्च (${rows.length})`;
-  $('entries').innerHTML = rows.map(r => {
-    const rec = (receiptsByExp.get(r.id) || []).map(p => `<button type="button" class="secondary rcBtn" data-path="${esc(p.storage_path)}" style="margin:6px 6px 0 0">📎 ${esc(p.original_filename)}</button>` +
-      `<span class="badge ${p.verification_status === 'verified' ? '' : p.verification_status === 'rejected' ? 'b-no' : 'b-warn'}">${p.verification_status === 'verified' ? 'जाँची ✓' : p.verification_status === 'rejected' ? 'अमान्य' : 'जाँच बाकी'}</span>`).join(' ');
-    return `<div class="item ${r.status}" id="it-${esc(r.id)}">
-      <div class="row"><b>${esc(r.item)}</b><span class="amount">${rupee(r.amount)}</span></div>
-      ${r.status === 'cancelled' ? `<span class="badge b-no">रद्द</span> <small>कारण: ${esc(r.cancel_reason)}</small>` : ''}
-      <span class="ref">${ref(r.ref_no)} · ${esc(r.expense_date)} · ${esc(r.category)} · ${esc(r.payer)} · ${esc(r.payment_method)}</span>
-      <small>दर्ज: ${esc(r.created_by_name)}, ${when(r.created_at)}${r.updated_by_name && r.updated_at !== r.created_at ? ` · अंतिम बदलाव: ${esc(r.updated_by_name)}, ${when(r.updated_at)}` : ''}</small>
-      <div>${rec}</div>
-      <div class="row" style="margin-top:8px">
-        ${canCorrect && r.status === 'active' ? `<button type="button" class="secondary fixBtn" data-id="${esc(r.id)}">सुधारें</button>
-          <button type="button" class="secondary cancelBtn" data-id="${esc(r.id)}">रद्द करें</button>` : ''}
-        <button type="button" class="secondary histBtn" data-id="${esc(r.id)}" style="flex:0 0 auto">इतिहास</button>
-      </div><div class="audit" id="au-${esc(r.id)}" hidden></div></div>`;
-  }).join('') || 'इस फ़िल्टर में कोई खर्च नहीं।';
-  const find = id => rows.find(x => x.id === id);
-  document.querySelectorAll('.rcBtn').forEach(b => b.onclick = () => openReceipt(b));
-  document.querySelectorAll('.fixBtn').forEach(b => b.onclick = () => correctDialog(find(b.dataset.id)));
-  document.querySelectorAll('.cancelBtn').forEach(b => b.onclick = () => cancelDialog(find(b.dataset.id)));
-  document.querySelectorAll('.histBtn').forEach(b => b.onclick = () => toggleHistory(b.dataset.id));
+  $('entries').innerHTML = rows.map(r => card(r, receiptsByExp.get(r.id) || [], canCorrect())).join('') || 'इस फ़िल्टर में कोई खर्च नहीं।';
+  bindCards(rows);
+}
+
+// ---------- केवल-सुधार: क्रमांक से एक खर्च (हर खोलना server पर दर्ज)
+let openedRef = null;
+const HIST = { created: 'दर्ज', corrected: 'सुधारा', cancelled: 'रद्द', receipt_attached: 'रसीद जुड़ी', receipt_verified: 'रसीद जाँची ✓', receipt_rejected: 'रसीद अमान्य' };
+const FIELDS = { expense_date: 'तारीख', item: 'मद', category: 'श्रेणी', amount: 'राशि', payer: 'भुगतानकर्ता', payment_method: 'तरीका' };
+function historyHtml(list) {
+  return (list || []).map(a => {
+    const diff = a.action === 'corrected' && a.old_data && a.new_data ? Object.keys(FIELDS).filter(k => String(a.old_data[k]) !== String(a.new_data[k]))
+      .map(k => `${FIELDS[k]}: ${esc(k === 'amount' ? rupee(a.old_data[k]) : a.old_data[k])} → ${esc(k === 'amount' ? rupee(a.new_data[k]) : a.new_data[k])}`).join('; ') : '';
+    return `${when(a.at)} — <b>${HIST[a.action] || esc(a.action)}</b> (${esc(a.actor_name || '')})${a.reason ? ' · कारण: ' + esc(a.reason) : ''}${diff ? '<br>' + diff : ''}`;
+  }).join('<br>') || 'कोई रिकॉर्ड नहीं';
+}
+async function openByRef(raw) {
+  const n = Number(String(raw ?? '').trim().replace(/^SK-?/i, ''));
+  if (!Number.isInteger(n) || n <= 0) { show('सही क्रमांक डालें, जैसे SK-000012 या 12।', 'error'); return; }
+  const { data, error } = await db.rpc('sk_open_for_correction', { p_ref_no: n });
+  if (error) { $('openResult').innerHTML = ''; openedRef = null; show(errText(error), 'error'); await refresh(); return; }
+  openedRef = n;
+  const r = data.expense;
+  $('openResult').innerHTML = card(r, data.receipts || [], true, historyHtml(data.history));
+  bindCards([r]);
+}
+async function afterChange() {
+  if (openedRef !== null && !canRead()) { const n = openedRef; await refresh(); await openByRef(n); }
+  else await refresh();
 }
 
 async function loadSummary(f) {
@@ -252,14 +297,27 @@ async function toggleHistory(id) {
   const box = $('au-' + id);
   if (!box.hidden) { box.hidden = true; return; }
   const { data, error } = await db.from('sk_expense_audit').select('action,actor_name,at,reason,old_data,new_data').eq('expense_id', id).order('at');
-  const A = { created: 'दर्ज', corrected: 'सुधारा', cancelled: 'रद्द', receipt_attached: 'रसीद जुड़ी', receipt_verified: 'रसीद जाँची ✓', receipt_rejected: 'रसीद अमान्य' };
-  const F = { expense_date: 'तारीख', item: 'मद', category: 'श्रेणी', amount: 'राशि', payer: 'भुगतानकर्ता', payment_method: 'तरीका' };
-  box.innerHTML = error ? esc(errText(error)) : (data || []).map(a => {
-    const diff = a.action === 'corrected' && a.old_data && a.new_data ? Object.keys(F).filter(k => String(a.old_data[k]) !== String(a.new_data[k]))
-      .map(k => `${F[k]}: ${esc(k === 'amount' ? rupee(a.old_data[k]) : a.old_data[k])} → ${esc(k === 'amount' ? rupee(a.new_data[k]) : a.new_data[k])}`).join('; ') : '';
-    return `${when(a.at)} — <b>${A[a.action] || esc(a.action)}</b> (${esc(a.actor_name || '')})${a.reason ? ' · कारण: ' + esc(a.reason) : ''}${diff ? '<br>' + diff : ''}`;
-  }).join('<br>') || 'कोई रिकॉर्ड नहीं';
+  box.innerHTML = error ? esc(errText(error)) : historyHtml(data);
   box.hidden = false;
+}
+
+function addReceiptDialog(r, have) {
+  if (!r) return;
+  dialog({
+    title: `रसीद जोड़ें: ${ref(r.ref_no)}`, ok: 'जोड़ें',
+    html: `<p>इस खर्च में ${have}/5 रसीदें हैं; अधिकतम ${5 - have} और जुड़ सकती हैं। जुड़ने के बाद रसीद बदली/हटाई नहीं जा सकती और बदलाव-रिकॉर्ड में दर्ज होती है।</p>
+      <input id="rcFiles" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">`,
+    onOk: async () => {
+      try {
+        const files = await prepareFiles($('rcFiles').files);
+        if (!files.length) { $('rcFiles').focus(); return false; }
+        if (have + files.length > 5) throw Error(`अधिकतम 5 रसीदें — अभी केवल ${5 - have} और जुड़ सकती हैं।`);
+        const n = await uploadReceipts(r.id, files);
+        show(`${ref(r.ref_no)} में ${n} रसीद जुड़ी।`, 'success');
+      } catch (e) { show(errText(e), 'error'); }
+      await afterChange(); return true;
+    },
+  });
 }
 
 function correctDialog(r) {
@@ -283,7 +341,7 @@ function correctDialog(r) {
         p_item: $('cItem').value.trim(), p_category: $('cCategory').value, p_amount: paiseToText(p), p_payer: $('cPayer').value.trim(),
         p_method: $('cMethod').value, p_reason: reason });
       if (error) show('सुधार नहीं हुआ: ' + errText(error), 'error'); else show(`${ref(r.ref_no)} सुधारा गया।`, 'success');
-      await refresh(); return true;
+      await afterChange(); return true;
     },
   });
 }
@@ -298,7 +356,7 @@ function cancelDialog(r) {
       const reason = $('xReason').value.trim(); if (reason.length < 5) { $('xReason').focus(); return false; }
       const { error } = await db.rpc('sk_cancel_expense', { p_id: r.id, p_expected_version: r.version, p_reason: reason });
       if (error) show('रद्द नहीं हुआ: ' + errText(error), 'error'); else show(`${ref(r.ref_no)} रद्द किया गया।`, 'success');
-      await refresh(); return true;
+      await afterChange(); return true;
     },
   });
 }
@@ -325,16 +383,26 @@ async function loadMembers() {
     try { const { error } = await db.rpc(fn, args); if (error) throw error; show(okMsg, 'success'); }
     catch (e) { show(errText(e), 'error'); } finally { setBusy(false); await loadMembers(); }
   };
-  document.querySelectorAll('.apBtn').forEach(b => b.onclick = () => {
+  const byId = new Map(data.map(m => [m.user_id, m]));
+  // सुधार अधिकार नया दिया जा रहा हो तो दायरा साफ़ दिखाकर पुष्टि
+  const confirmCorrect = async (u, r, c) => {
+    if (!c || byId.get(u)?.can_correct) return true;
+    return dialog({ title: `${byId.get(u)?.display_name || ''} को सुधार अधिकार?`, ok: 'हाँ, सुधार अधिकार दें',
+      html: `<div class="notice">सुधार <b>सभी खर्चों पर लागू</b> है: यह सदस्य किसी भी खर्च को क्रमांक से खोलकर बदल सकेगा या कारण देकर रद्द कर सकेगा, और उसकी रसीदें देख/जोड़ सकेगा।</div>
+        <p>${r ? 'Read भी साथ है, इसलिए सभी खर्च और सभी रसीदें सूची में दिखेंगी।' : 'Read नहीं है: पूरी सूची, कुल और फ़िल्टर नहीं दिखेंगे; हर खर्च क्रमांक से खोलना होगा और हर खोलना दर्ज होगा।'}</p>
+        <small>हर सुधार/रद्द में कारण अनिवार्य है और पुरानी-नई जानकारी रिकॉर्ड में रहती है। अधिकार कभी भी वापस लिया जा सकता है।</small>` });
+  };
+  document.querySelectorAll('.apBtn').forEach(b => b.onclick = async () => {
     const [r, w, c] = rights(b.dataset.u, 'p');
     if (!(r || w || c)) { show('कम से कम एक अधिकार चुनें।', 'error'); return; }
-    if (c && !r) show('ध्यान दें: सुधार के साथ Read न हो तो सदस्य कुल/फ़िल्टर नहीं देख पाएगा।', '');
+    if (!(await confirmCorrect(b.dataset.u, r, c))) return;
     call('sk_admin_decide', { p_user: b.dataset.u, p_approve: true, p_read: r, p_write: w, p_correct: c, p_note: $('pn-' + b.dataset.u).value || null }, 'सदस्य मंज़ूर।');
   });
   document.querySelectorAll('.rjBtn').forEach(b => b.onclick = () =>
     call('sk_admin_decide', { p_user: b.dataset.u, p_approve: false, p_read: false, p_write: false, p_correct: false, p_note: $('pn-' + b.dataset.u).value || null }, 'अनुरोध अस्वीकृत।'));
-  document.querySelectorAll('.saveBtn').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.saveBtn').forEach(b => b.onclick = async () => {
     const [r, w, c] = rights(b.dataset.u, 'a');
+    if (!(await confirmCorrect(b.dataset.u, r, c))) return;
     call('sk_admin_set_rights', { p_user: b.dataset.u, p_read: r, p_write: w, p_correct: c, p_note: null }, 'अधिकार बदले — सदस्य की अगली कार्रवाई से लागू।');
   });
   document.querySelectorAll('.rmBtn').forEach(b => b.onclick = () => dialog({

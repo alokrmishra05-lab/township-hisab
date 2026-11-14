@@ -157,10 +157,38 @@ check(G, "Write वाला अपनी रसीद देख सकता �
 run(G, "Write वाला दूसरे के खर्च में रसीद नहीं जोड़ सकता", lambda: upload("writer", e1[0]), "row-level security")
 check(G, "Admin भी storage से रसीद delete नहीं कर सकता (0 पंक्ति)", q("admin", "delete from storage.objects") == 0)
 check(G, "Admin भी रसीद overwrite नहीं कर सकता (0 पंक्ति)", q("admin", "update storage.objects set metadata='{}'::jsonb") == 0)
-check(G, "सुधार वाला (Read के बिना भी) खर्च और सभी रसीदें देखता है",
-      val("corrector", "select count(*) from public.sk_expenses") >= 3 and val("corrector", "select count(*) from storage.objects") >= 3)
 run(G, "सुधार वाला नया खर्च नहीं जोड़ सकता (Write नहीं)", lambda: add("corrector"), "Write")
 run(G, "सुधार वाला summary नहीं देखता (Read नहीं)", lambda: q("corrector", "select * from public.sk_summary()"), "Read")
+
+# ---------- सुधार-पहुँच का दायरा (समीक्षा के बाद)
+G = "सुधार-पहुँच"
+check(G, "केवल-सुधार: सीधे खर्च-सूची 0 पंक्ति (सूची के लिए Read ज़रूरी)", val("corrector", "select count(*) from public.sk_expenses") == 0)
+check(G, "केवल-सुधार: सीधे रसीद-तालिका 0 पंक्ति", val("corrector", "select count(*) from public.sk_receipts") == 0)
+check(G, "केवल-सुधार: सीधे इतिहास 0 पंक्ति", val("corrector", "select count(*) from public.sk_expense_audit") == 0)
+check(G, "केवल-सुधार: storage सूची में कोई रसीद नहीं (खोलने से पहले)", val("corrector", "select count(*) from storage.objects") == 0)
+e1_ref = val("admin", "select ref_no from public.sk_expenses where id=%s", (e1[0],))
+op = run(G, "केवल-सुधार: क्रमांक से एक खर्च खोलता है", lambda: val("corrector", "select public.sk_open_for_correction(%s)", (e1_ref,)))
+check(G, "…उसमें खर्च, उसकी रसीद और इतिहास मिलते हैं", bool(op) and op["expense"]["id"] == e1[0] and len(op["receipts"]) == 1 and len(op["history"]) >= 2, str(op)[:120] if op else "")
+check(G, "…अब केवल उसी खर्च की रसीद storage में दिखती है (1)", val("corrector", "select count(*) from storage.objects") == 1)
+check(G, "…वह रसीद उसी खर्च की है", val("corrector", "select name from storage.objects") == p1)
+check(G, "खोलना Admin के रिकॉर्ड में दर्ज", val("admin", "select count(*) from public.sk_correction_opens where user_id=%s", (U["corrector"],)) == 1)
+check(G, "सदस्य खोलने का रिकॉर्ड नहीं देख/बदल सकता", val("corrector", "select count(*) from public.sk_correction_opens") == 0)
+run(G, "खोलने का रिकॉर्ड बदला नहीं जा सकता", lambda: cur.execute("update public.sk_correction_opens set expires_at=now()+interval '1 year'"), "अपरिवर्तनीय")
+cur.execute("alter table public.sk_correction_opens disable trigger sk_correction_opens_block")
+cur.execute("update public.sk_correction_opens set expires_at = now() - interval '1 second'")   # परीक्षण हेतु समय बीतना
+cur.execute("alter table public.sk_correction_opens enable trigger sk_correction_opens_block")
+check(G, "10 मिनट बाद (समय बीतने पर) रसीद फिर बंद", val("corrector", "select count(*) from storage.objects") == 0)
+run(G, "Read/सुधार दोनों नहीं: क्रमांक से खोलना रुका", lambda: val("reader", "select public.sk_open_for_correction(%s)", (e1_ref,)), "सुधार")
+run(G, "Write-only: क्रमांक से खोलना रुका", lambda: val("writer", "select public.sk_open_for_correction(%s)", (e1_ref,)), "सुधार")
+run(G, "अनजान क्रमांक", lambda: val("corrector", "select public.sk_open_for_correction(999999)"), "नहीं मिला")
+q("admin", "select public.sk_admin_set_rights(%s,true,false,true,null)", (U["corrector"],))
+check(G, "Read+सुधार: सूची और सभी जुड़ी रसीदें", val("corrector", "select count(*) from public.sk_expenses") >= 3 and val("corrector", "select count(*) from public.sk_receipts") >= 3)
+q("admin", "select public.sk_admin_set_rights(%s,false,false,true,null)", (U["corrector"],))
+val("corrector", "select public.sk_open_for_correction(%s)", (e1_ref,))
+q("admin", "select public.sk_admin_set_rights(%s,false,false,false,'सुधार वापस')", (U["corrector"],))
+check(G, "सुधार वापस लेते ही (10 मिनट के भीतर भी) रसीद storage से बंद", val("corrector", "select count(*) from storage.objects") == 0)
+run(G, "…और उसी लॉगिन से खोलना/सुधार रुका", lambda: val("corrector", "select public.sk_open_for_correction(%s)", (e1_ref,)), "सुधार")
+q("admin", "select public.sk_admin_set_rights(%s,false,false,true,null)", (U["corrector"],))
 
 # ---------- स्वीकृति जाँच 4: सुधार/रद्द → रिकॉर्ड, कुल, CSV मिलान
 G = "जाँच 4"
@@ -221,6 +249,34 @@ cur.execute("update public.sk_receipts set verification_status='verified', sha25
 cur.execute("reset role")
 check(G, "server जाँच का परिणाम बदलाव-रिकॉर्ड में", val("admin", "select count(*) from public.sk_expense_audit where action='receipt_verified'") == 1)
 run(G, "रद्द खर्च में नई रसीद नहीं", lambda: upload("corrector", e_w[0]), "row-level security")
+
+# ---------- प्रति खर्च अधिकतम 5 रसीदें (server पर)
+G = "5 रसीद सीमा"
+import threading
+e5 = add("rw", item="पाँच रसीद परीक्षण", amt="10.00")
+for i in range(4):
+    q("rw", "select public.sk_attach_receipt(%s,%s,%s)", (e5[0], upload("rw", e5[0]), f"r{i}.pdf"))
+check(G, "4 रसीदें जुड़ीं", val("admin", "select count(*) from public.sk_receipts where expense_id=%s", (e5[0],)) == 4)
+pa, pb = upload("rw", e5[0]), None
+run(G, "storage: 6वीं फ़ाइल upload रुकी (folder में 5 पहले से)", lambda: upload("rw", e5[0]), "row-level security")
+# साथ-साथ दो attach: एक पहले से अपलोड (pa) + एक नया path जो storage में डालें बिना सीमा के (superuser से, race अनुकरण)
+pb = f"{U['rw']}/{e5[0]}/{uuid.uuid4()}.pdf"
+cur.execute("insert into storage.objects(bucket_id,name,owner_id,metadata) values ('sk-receipts',%s,%s,%s)", (pb, U["rw"], json.dumps({"mimetype": "application/pdf", "size": 9})))
+outs = []
+def worker(path):
+    cc = psycopg2.connect(dbname=sys.argv[1] if len(sys.argv) > 1 else "t"); kk = cc.cursor()
+    kk.execute("select set_config('request.jwt.claim.sub', %s, false)", (U["rw"],)); kk.execute("set role authenticated")
+    try:
+        kk.execute("select pg_sleep(0.3)"); kk.execute("select public.sk_attach_receipt(%s,%s,'x.pdf')", (e5[0], path)); cc.commit(); outs.append("ok")
+    except psycopg2.Error as ex:
+        cc.rollback(); outs.append("रुका" if "RECEIPT_LIMIT" in (ex.pgerror or "") else "अन्य: " + (ex.pgerror or "")[:60])
+    cc.close()
+ts = [threading.Thread(target=worker, args=(x,)) for x in (pa, pb)]
+[t.start() for t in ts]; [t.join() for t in ts]
+n5 = val("admin", "select count(*) from public.sk_receipts where expense_id=%s", (e5[0],))
+check(G, "साथ-साथ दो attach (4→?): एक सफल, एक RECEIPT_LIMIT से रुका", sorted(outs) == ["ok", "रुका"], str(outs))
+check(G, "रसीदें ठीक 5 (6 कभी नहीं)", n5 == 5, str(n5))
+run(G, "Admin भी 6वीं रसीद नहीं जोड़ सकता", lambda: q("admin", "select public.sk_attach_receipt(%s,%s,'y.pdf')", (e5[0], upload("admin", e5[0]))), "row-level security")
 
 # ---------- रिपोर्ट
 for g, s, n, i in res:

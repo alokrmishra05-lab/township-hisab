@@ -141,6 +141,51 @@ with sync_playwright() as p:
     pg.evaluate("window.__STATE.sk_members.find(m => m.user_id === 'u-writer').can_write = false")  # Admin की ओर से (server पर)
     pg.evaluate("document.querySelector('#tabs button')?.click()"); pg.wait_for_timeout(400)
     check('Write वापस लेते ही उसी लॉगिन में "जोड़ें" टैब ग़ायब', 'खर्च जोड़ें' not in pg.inner_text('#tabs') and 'कोई अधिकार नहीं' in pg.inner_text('#message'))
+    # केवल-सुधार सदस्य: सूची/कुल नहीं; क्रमांक से खोलना
+    pg, errs = open_as(p, 'corrector')
+    check('केवल-सुधार: "क्रमांक से खोलें" बॉक्स, सूची/कुल/फ़िल्टर छिपे', pg.is_visible('#openBox') and not pg.is_visible('#listCard')
+          and not pg.is_visible('#summaryCard') and not pg.is_visible('#filterCard'))
+    check('केवल-सुधार: सीधे सूची लोड करने की कोशिश भी नहीं', not any(c[1] == 'sk_summary' for c in pg.evaluate('window.__calls')))
+    pg.fill('#openRef', 'SK-000001'); pg.click('#openBtn'); pg.wait_for_timeout(400)
+    check('SK-000001 खुला: खर्च, रसीद और "रसीद जोड़ें (1/5)"', 'सीमेंट 50 बोरी' in pg.inner_text('#openResult') and 'bill.pdf' in pg.inner_text('#openResult')
+          and 'रसीद जोड़ें (1/5)' in pg.inner_text('#openResult'), pg.inner_text('#openResult')[:150])
+    pg.click('#openResult .addRcBtn'); pg.wait_for_selector('#modal:not([hidden])')
+    big = [{'name': f'r{i}.pdf', 'mimeType': 'application/pdf', 'buffer': open(f'{SAMPLES}/bill.pdf', 'rb').read()} for i in range(5)]
+    pg.set_input_files('#rcFiles', files=big); pg.click('#modalOk'); pg.wait_for_timeout(500)
+    check('UI: 1 मौजूद + 5 नई = 6 → "केवल 4 और" कहकर रुका, कुछ अपलोड नहीं',
+          'केवल 4' in pg.inner_text('#message') and not any(c[0] == 'upload' for c in pg.evaluate('window.__calls')), pg.inner_text('#message')[:100])
+    pg.click('#openResult .addRcBtn'); pg.wait_for_selector('#modal:not([hidden])')
+    pg.set_input_files('#rcFiles', files=big[:1]); pg.click('#modalOk'); pg.wait_for_timeout(700)
+    check('1 रसीद जुड़ी → कार्ड पर "रसीद जोड़ें (2/5)"', 'रसीद जोड़ें (2/5)' in pg.inner_text('#openResult'), pg.inner_text('#openResult')[:200])
+    pg.click('#openResult .fixBtn'); pg.wait_for_selector('#modal:not([hidden])')
+    pg.fill('#cAmount', '21400.75'); pg.fill('#cReason', 'बिल दोबारा मिलाया'); pg.click('#modalOk'); pg.wait_for_timeout(700)
+    check('केवल-सुधार: सुधार के बाद वही खर्च दोबारा खुला, नई राशि ₹21,400.75 और इतिहास में कारण',
+          '₹21,400.75' in pg.inner_text('#openResult') and 'बिल दोबारा मिलाया' in pg.inner_text('#openResult'), pg.inner_text('#openResult')[:200])
+    pg.fill('#openRef', '999'); pg.click('#openBtn'); pg.wait_for_timeout(300)
+    check('अनजान क्रमांक पर साफ़ संदेश', 'नहीं मिला' in pg.inner_text('#message'))
+    check('केवल-सुधार सत्र में JS त्रुटि नहीं', not errs, str(errs))
+    pg.screenshot(path=f'{SHOTS}/6_corrector_only.png', full_page=True)
+    # 5/5 पर UI में बटन ही नहीं
+    pg, errs = open_as(p, 'admin')
+    pg.evaluate("""for (let i=0;i<4;i++) window.__STATE.sk_receipts.push({id:'x'+i,expense_id:'e1',storage_path:'u-admin/e1/'+i+'.pdf',original_filename:'f'+i+'.pdf',verification_status:'pending',uploaded_by:'u-admin'})""")
+    pg.click('#tabs button[data-t="register"]'); pg.wait_for_timeout(400)
+    check('5/5 रसीदें: "रसीद जोड़ें" बटन नहीं, "सीमा पूरी" संदेश', pg.locator('#it-e1 .addRcBtn').count() == 0 and '5/5' in pg.inner_text('#it-e1'))
+    # Admin: सुधार देते समय स्पष्ट पुष्टि
+    pg.click('#tabs button[data-t="members"]'); pg.wait_for_timeout(400)
+    check('Admin सदस्य-स्क्रीन पर "सुधार = सभी खर्चों पर लागू" साफ़ लिखा', 'सभी खर्चों पर लागू' in pg.inner_text('#v-members'))
+    pg.check('#pc-u-pend'); pg.uncheck('#pr-u-pend'); pg.click('.apBtn'); pg.wait_for_selector('#modal:not([hidden])')
+    body = pg.inner_text('#modalBody')
+    check('सुधार (Read के बिना) देते समय पुष्टि-संवाद: सभी खर्चों पर लागू + सूची नहीं', 'सभी खर्चों पर लागू' in body and 'Read नहीं है' in body, body[:160])
+    pg.screenshot(path=f'{SHOTS}/7_admin_confirm_correct.png')
+    pg.click('#modalCancel'); pg.wait_for_timeout(200)
+    check('पुष्टि रद्द → कोई मंज़ूरी नहीं भेजी', not any(c[1] == 'sk_admin_decide' for c in pg.evaluate('window.__calls')))
+    pg.check('#ac-u-rd')
+    btn = pg.locator('.saveBtn[data-u="u-rd"]'); btn.click(); pg.wait_for_selector('#modal:not([hidden])')
+    check('Read वाले को सुधार देते समय: "सभी खर्च और सभी रसीदें दिखेंगी"', 'सभी रसीदें' in pg.inner_text('#modalBody'))
+    pg.click('#modalOk'); pg.wait_for_timeout(500)
+    m = [x for x in pg.evaluate('window.__STATE.sk_members') if x['user_id'] == 'u-rd'][0]
+    check('पुष्टि के बाद अधिकार सहेजे गए (Read+सुधार)', m['can_read'] and m['can_correct'])
+
     # Dark + desktop
     pg, errs = open_as(p, 'admin', 1280, 900, dark=True)
     pg.click('#tabs button[data-t="register"]'); pg.wait_for_timeout(400)

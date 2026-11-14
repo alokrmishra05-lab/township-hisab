@@ -113,7 +113,14 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   </section>
 
   <section id="v-register" hidden>
-    <div class="card">
+    <div class="card" id="openBox" hidden>
+      <h2>सुधार हेतु खर्च खोलें</h2>
+      <small>सुधार अधिकार सभी खर्चों पर लागू है, पर पूरी सूची, कुल और फ़िल्टर के लिए Read चाहिए। खर्च का क्रमांक (जैसे SK-000012 या 12) डालें। हर खोलना Admin के रिकॉर्ड में दर्ज होता है; रसीद 10 मिनट तक खुलती है।</small>
+      <div class="row" style="margin-top:10px"><input id="openRef" inputmode="numeric" placeholder="SK-000012" style="flex:2">
+        <button id="openBtn" type="button" style="flex:1">खोलें</button></div>
+      <div id="openResult" style="margin-top:12px"></div>
+    </div>
+    <div class="card" id="filterCard">
       <h2>फ़िल्टर</h2>
       <div class="grid">
         <div><label for="qFrom">तारीख से</label><input id="qFrom" type="date"></div>
@@ -130,13 +137,16 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
       <div class="grid"><div><h3>महीने के अनुसार</h3><table id="byMonth"></table></div>
         <div><h3>श्रेणी के अनुसार</h3><table id="byCategory"></table></div></div>
     </div>
-    <div class="card"><h2 id="listTitle">खर्च</h2><div id="entries" class="muted">लोड हो रहा है…</div></div>
+    <div class="card" id="listCard"><h2 id="listTitle">खर्च</h2><div id="entries" class="muted">लोड हो रहा है…</div></div>
   </section>
 
   <section id="v-members" hidden>
     <div class="card"><h2>जुड़ने के अनुरोध (Pending)</h2><div id="pendingList" class="muted"></div></div>
     <div class="card"><h2>सक्रिय सदस्य और अधिकार</h2>
-      <small>Read = सूची, फ़िल्टर, कुल · Write = नया खर्च + रसीद · सुधार = खर्च सुधारना/रद्द करना और सभी रसीदें देखना (सूची खोजने हेतु सुधार के साथ Read भी दें)।</small>
+      <div class="notice" style="margin-top:4px"><b>अधिकारों का दायरा</b>
+• Read = पूरी खर्च सूची, फ़िल्टर, महीने/श्रेणी के कुल और बदलाव का इतिहास (रसीदें नहीं)।
+• Write = नया खर्च और उसकी रसीद जोड़ना। पुराना खर्च (अपना भी) बदलना नहीं।
+• सुधार = <b>सभी खर्चों पर लागू</b>: सदस्य किसी भी खर्च को क्रमांक से खोलकर बदल या कारण देकर रद्द कर सकता है, उसकी रसीदें देख व जोड़ सकता है। Read के बिना वह सूची/कुल नहीं देखता; हर खोलना दर्ज होता है। Read + सुधार दोनों हों तो सभी खर्च और सभी रसीदें दिखती हैं।</div>
       <div id="activeList" class="muted" style="margin-top:10px"></div></div>
     <div class="card"><h2>अस्वीकृत / हटाए गए</h2><div id="closedList" class="muted"></div></div>
     <div class="card"><h2>सदस्य-बदलाव का रिकॉर्ड</h2><div id="memberAudit" class="audit"></div></div>

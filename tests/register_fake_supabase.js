@@ -10,7 +10,8 @@
       { user_id: 'u-admin', display_name: 'आलोक (परीक्षण)', status: 'active', is_admin: true, can_read: true, can_write: true, can_correct: true, requested_at: '2026-11-01T00:00:00Z' },
       { user_id: 'u-reader', display_name: 'पाठक (परीक्षण)', status: 'active', is_admin: false, can_read: true, can_write: false, can_correct: false, requested_at: '2026-11-02T00:00:00Z' },
       { user_id: 'u-writer', display_name: 'लेखक (परीक्षण)', status: 'active', is_admin: false, can_read: false, can_write: true, can_correct: false, requested_at: '2026-11-03T00:00:00Z' },
-      { user_id: 'u-corr', display_name: 'सुधारक (परीक्षण)', status: 'active', is_admin: false, can_read: true, can_write: false, can_correct: true, requested_at: '2026-11-04T00:00:00Z' },
+      { user_id: 'u-corr', display_name: 'सुधारक (परीक्षण)', status: 'active', is_admin: false, can_read: false, can_write: false, can_correct: true, requested_at: '2026-11-04T00:00:00Z' },
+      { user_id: 'u-rd', display_name: 'पाठक-दो (परीक्षण)', status: 'active', is_admin: false, can_read: true, can_write: false, can_correct: false, requested_at: '2026-11-05T00:00:00Z' },
       { user_id: 'u-pend', display_name: 'नया सदस्य (परीक्षण)', status: 'pending', is_admin: false, can_read: false, can_write: false, can_correct: false, requested_at: '2026-11-14T00:00:00Z' },
     ],
     sk_expenses: [
@@ -30,8 +31,8 @@
   const err = m => ({ data: null, error: { message: m } });
   const visible = t => {
     if (t === 'sk_members') return admin() ? S.sk_members : S.sk_members.filter(m => m.user_id === me);
-    if (t === 'sk_expenses' || t === 'sk_expense_audit') return has('read') || has('correct') ? S[t] : [];
-    if (t === 'sk_receipts') return S.sk_receipts.filter(r => admin() || has('correct') || (active() && r.uploaded_by === me));
+    if (t === 'sk_expenses' || t === 'sk_expense_audit') return has('read') ? S[t] : [];
+    if (t === 'sk_receipts') return S.sk_receipts.filter(r => admin() || (has('read') && has('correct')) || (active() && r.uploaded_by === me));
     if (t === 'sk_member_audit') return admin() ? S.sk_member_audit : [];
     return [];
   };
@@ -78,7 +79,12 @@
       return { data: [{ kind: 'total', key: 'सक्रिय', entries: act.length, total: sum(act) }, { kind: 'cancelled', key: 'रद्द', entries: can.length, total: sum(can) },
         ...grp(act, e => e.expense_date.slice(0, 7)).map(([k, l]) => ({ kind: 'month', key: k, entries: l.length, total: sum(l) })),
         ...grp(act, e => e.category).map(([k, l]) => ({ kind: 'category', key: k, entries: l.length, total: sum(l) }))], error: null }; },
-    sk_attach_receipt: a => { const r = { id: 'r' + (S.sk_receipts.length + 1), expense_id: a.p_expense_id, storage_path: a.p_storage_path, original_filename: a.p_original_filename, verification_status: 'pending', uploaded_by: me, created_at: now() };
+    sk_open_for_correction: a => { if (!has('correct')) return err('सुधार का अधिकार नहीं');
+      const e = S.sk_expenses.find(x => x.ref_no === a.p_ref_no); if (!e) return err('इस क्रमांक का खर्च नहीं मिला');
+      (S.opens = S.opens || []).push({ user: me, expense: e.id });
+      return { data: { expense: { ...e }, receipts: S.sk_receipts.filter(r => r.expense_id === e.id), history: S.sk_expense_audit.filter(h => h.expense_id === e.id) }, error: null }; },
+    sk_attach_receipt: a => { if (S.sk_receipts.filter(r => r.expense_id === a.p_expense_id).length >= 5) return err('RECEIPT_LIMIT: एक खर्च में अधिकतम 5 रसीदें');
+      const r = { id: 'r' + (S.sk_receipts.length + 1), expense_id: a.p_expense_id, storage_path: a.p_storage_path, original_filename: a.p_original_filename, verification_status: 'pending', uploaded_by: me, created_at: now() };
       S.sk_receipts.push(r); logE(a.p_expense_id, 'receipt_attached'); return { data: r.id, error: null }; },
   };
   window.supabase = { createClient: () => ({

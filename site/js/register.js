@@ -7,7 +7,7 @@ const $ = id => document.getElementById(id);
 const cfg = window.SK_REGISTER_CONFIG || {};
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-export const CATEGORIES = ['भूमि / रजिस्ट्री', 'मिट्टी भराई', 'मजदूरी', 'निर्माण सामग्री', 'बिजली / पानी',
+export const CATEGORIES = ['भूमि खरीद', 'भूमि / रजिस्ट्री', 'दलाली / कमीशन', 'आर्किटेक्ट', 'मिट्टी भराई', 'मजदूरी', 'निर्माण सामग्री', 'बिजली / पानी',
   'मशीन / वाहन', 'कार्यालय / यात्रा', 'लेआउट / स्वीकृति शुल्क', 'सड़क / प्लॉटिंग विकास',
   'कानूनी / दस्तावेज़', 'साइट रखरखाव', 'अन्य'];
 const METHODS = ['नकद', 'UPI', 'बैंक ट्रांसफर', 'चेक', 'अन्य'];
@@ -137,14 +137,15 @@ async function refresh() {
   const r = { read: me.is_admin || me.can_read, write: me.is_admin || me.can_write, correct: me.is_admin || me.can_correct };
   $('identity').textContent = `${me.display_name} · ${me.is_admin ? 'Admin' : 'सदस्य'} · अधिकार: ` +
     [r.read && 'Read', r.write && 'Write', r.correct && 'सुधार'].filter(Boolean).join(', ');
-  const tabs = [r.write && ['add', 'खर्च जोड़ें'], (r.read || r.correct) && ['register', 'रजिस्टर'],
+  const tabs = [r.read && ['hisab', 'कुल हिसाब'], r.write && ['add', 'खर्च जोड़ें'], (r.read || r.correct) && ['register', 'रजिस्टर'],
     me.is_admin && ['members', 'सदस्य'], me.is_admin && ['export', 'CSV / समापन']].filter(Boolean);
   if (!tabs.some(t => t[0] === tab)) tab = tabs[0]?.[0] || null;
   $('tabs').innerHTML = tabs.map(([k, t]) => `<button type="button" data-t="${k}" class="${k === tab ? 'on' : ''}">${t}</button>`).join('');
   $('tabs').querySelectorAll('button').forEach(b => b.onclick = () => { tab = b.dataset.t; refresh(); });
-  ['add', 'register', 'members', 'export'].forEach(v => $('v-' + v).hidden = v !== tab);
+  ['hisab', 'add', 'register', 'members', 'export'].forEach(v => $('v-' + v).hidden = v !== tab);
   if (!tabs.length) show('आपके पास अभी कोई अधिकार नहीं है। Admin से संपर्क करें।', 'error');
   $('summaryCard').hidden = !r.read;
+  if (tab === 'hisab') await loadHisab();
   if (tab === 'register') await loadRegister();
   if (tab === 'members') await loadMembers();
   await loadOpenSlots();
@@ -399,6 +400,25 @@ function cancelDialog(r) {
       await afterChange(); return true;
     },
   });
+}
+
+// ---------- कुल हिसाब: साझेदार-वार निवेश + खर्च, तय हिस्सा और अंतर (database में गणना)
+async function loadHisab() {
+  $('hisabBox').textContent = 'लोड हो रहा है…';
+  const { data, error } = await db.rpc('sk_partner_summary');
+  if (error) { $('hisabBox').textContent = errText(error); return; }
+  const P = v => { const t = String(v ?? '0').trim(), neg = t.startsWith('-'); const p = toPaise(neg ? t.slice(1) : t) ?? 0n; return neg ? -p : p; };
+  const all = data.find(x => x.kind === 'all'), other = data.find(x => x.kind === 'other');
+  const partners = data.filter(x => x.kind === 'partner');
+  const sign = v => { const p = P(v); return p > 0n ? `<b class="pos">+${rupee(p)}</b> <small>लेना है</small>` : p < 0n ? `<b class="neg">−${rupee(-p)}</b> <small>देना है</small>` : '<b>बराबर</b>'; };
+  $('hisabBox').innerHTML = `<div class="totals"><div><small>कुल (साझेदारों से)</small><b>${rupee(P(all?.total))}</b></div>
+      <div><small>निवेश (भूमि खरीद)</small><b>${rupee(P(all?.invest))}</b></div><div><small>बाकी खर्च</small><b>${rupee(P(all?.spend))}</b></div></div>
+    ${partners.map(x => `<div class="item"><b>${esc(x.name)}</b> <small>हिस्सा ${(Number(x.share) * 100).toFixed(2)}% · ${x.entries} एंट्री</small>
+      <table><tr><td>निवेश</td><td>${rupee(P(x.invest))}</td></tr><tr><td>खर्च</td><td>${rupee(P(x.spend))}</td></tr>
+      <tr><td><b>कुल योगदान</b></td><td><b>${rupee(P(x.total))}</b></td></tr><tr><td>तय हिस्सा</td><td>${rupee(P(x.due))}</td></tr>
+      <tr><td>अंतर</td><td>${sign(x.diff)}</td></tr></table></div>`).join('')}
+    ${P(other?.total) > 0n ? `<div class="notice">अन्य भुगतानकर्ता (जैसे साइट कैश): ${rupee(P(other.total))} · ${other.entries} एंट्री — यह साझेदारों के हिस्से में नहीं जुड़ा।</div>` : ''}
+    <small>"भूमि खरीद" श्रेणी = निवेश, बाकी = खर्च। केवल सक्रिय (रद्द नहीं) एंट्री गिनी जाती हैं। "अंतर" = साझेदार का कुल योगदान − कुल राशि में उसका तय हिस्सा; + वाले को बाकी साझेदारों से लेना है, − वाले को देना है।</small>`;
 }
 
 // ---------- Admin: सदस्य

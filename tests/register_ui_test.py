@@ -112,7 +112,8 @@ with sync_playwright() as p:
     # Reader: जोड़/सुधार नहीं
     pg, errs = open_as(p, 'reader')
     tabs = pg.inner_text('#tabs')
-    check('Read: केवल "रजिस्टर" टैब (जोड़ें/सदस्य/CSV नहीं)', 'रजिस्टर' in tabs and 'खर्च जोड़ें' not in tabs and 'सदस्य' not in tabs)
+    check('Read: "कुल हिसाब" + "रजिस्टर" टैब (जोड़ें/सदस्य/CSV नहीं)', 'कुल हिसाब' in tabs and 'रजिस्टर' in tabs and 'खर्च जोड़ें' not in tabs and 'सदस्य' not in tabs)
+    pg.click('#tabs button[data-t="register"]'); pg.wait_for_timeout(500)
     check('Read: सुधारें/रद्द बटन नहीं', pg.locator('.fixBtn, .cancelBtn').count() == 0)
     check('Read: कुल दिखता है', pg.is_visible('#activeTotal'))
     # Writer: केवल जोड़ना, रसीद के साथ
@@ -241,6 +242,19 @@ with sync_playwright() as p:
     check('हर गैर-Admin सदस्य पर "पासवर्ड बदलें" बटन, Admin पर नहीं', pg.locator('.pinBtn').count() >= 4 and pg.locator('.pinBtn[data-u="u-admin"]').count() == 0)
     pg.screenshot(path=f'{SHOTS}/6_admin_new_member.png', full_page=True)
     check('Admin सदस्य-स्क्रीन में JS त्रुटि नहीं', not errs, str(errs))
+
+    # कुल हिसाब टैब
+    pg, errs = open_as(p, 'admin')
+    check('Admin: "कुल हिसाब" टैब पहला', pg.locator('#tabs button').first.inner_text() == 'कुल हिसाब')
+    pg.click('#tabs button[data-t="hisab"]'); pg.wait_for_timeout(500)
+    hb = pg.inner_text('#hisabBox')
+    check('कुल हिसाब: तीनों साझेदार, योगदान/तय हिस्सा/अंतर', all(w in hb for w in ['आलोक रंजन मिश्र', 'अमरनाथ पाण्डेय', 'गगन आचारी', 'तय हिस्सा', 'अंतर']), hb[:200])
+    check('कुल हिसाब: साझेदार-कुल ₹22,735.31 (गगन+अमरनाथ), साइट कैश अलग', '₹22,735.31' in hb, hb[:300])
+    check('कुल हिसाब: ऋण अंतर "देना है" (आलोक −₹7,578.44), धन अंतर "लेना है"', '−₹7,578.44' in hb and 'देना है' in hb and '+₹13,922.31' in hb and 'लेना है' in hb, hb[:400])
+    pg.screenshot(path=f'{SHOTS}/7_hisab.png', full_page=True)
+    check('कुल हिसाब में JS त्रुटि नहीं', not errs, str(errs))
+    pg, errs = open_as(p, 'writer')
+    check('केवल-Write (सहायक) को "कुल हिसाब" टैब नहीं', 'कुल हिसाब' not in pg.inner_text('#tabs'))
 
     # Dark + desktop
     pg, errs = open_as(p, 'admin', 1280, 900, dark=True)

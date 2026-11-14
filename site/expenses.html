@@ -60,6 +60,8 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .sheet{background:var(--card);color:var(--ink);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:92vh;overflow:auto}
 @media(min-width:600px){.modal{align-items:center}.sheet{border-radius:18px}}
 .sheet h3{margin:0 0 8px;font-size:18px}
+.pos{color:#1b7a3a}.neg{color:#b42318}
+#hisabBox table{width:100%;margin-top:6px}#hisabBox td:last-child{text-align:right}
 </style>
 </head>
 <body>
@@ -98,6 +100,11 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   <div class="muted" id="identity"></div>
   <div id="openSlots" class="notice" hidden></div>
   <nav class="tabs" id="tabs"></nav>
+
+  <section id="v-hisab" class="card" hidden>
+    <h2>कुल हिसाब — साझेदार-वार</h2>
+    <div id="hisabBox" class="muted"></div>
+  </section>
 
   <section id="v-add" class="card" hidden>
     <h2>नया खर्च जोड़ें</h2>

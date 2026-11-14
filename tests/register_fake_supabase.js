@@ -92,6 +92,14 @@
     sk_release_receipt_slot: a => { const s = (S.slots || []).find(x => x.storage_path === a.p_storage_path && x.status === 'reserved');
       if (!s) return err('खुला आरक्षण नहीं मिला'); if (s.uploaded) return err('फ़ाइल चढ़ चुकी है'); s.status = 'released'; return { data: null, error: null }; },
     sk_my_open_slots: () => ({ data: (S.slots || []).filter(s => s.status === 'reserved').map(s => ({ ...s, ref_no: (S.sk_expenses.find(e => e.id === s.expense_id) || {}).ref_no })), error: null }),
+    sk_partner_summary: () => { if (!has('read')) return err('Read अधिकार नहीं');
+      const parts = ['आलोक रंजन मिश्र', 'अमरनाथ पाण्डेय', 'गगन आचारी'], act = S.sk_expenses.filter(e => e.status === 'active');
+      const sum = l => l.reduce((s, e) => s + P(e.amount), 0), inv = l => l.filter(e => e.category === 'भूमि खरीद'), sp = l => l.filter(e => e.category !== 'भूमि खरीद');
+      const pa = act.filter(e => parts.includes(e.payer)), tot = sum(pa), ot = act.filter(e => !parts.includes(e.payer));
+      return { data: [...parts.map(n => { const m = pa.filter(e => e.payer === n), due = Math.round(tot / 3);
+        return { kind: 'partner', name: n, share: 0.333333, invest: txt(sum(inv(m))), spend: txt(sum(sp(m))), total: txt(sum(m)), due: txt(due), diff: (sum(m) - due < 0 ? '-' : '') + txt(Math.abs(sum(m) - due)), entries: m.length }; }),
+        { kind: 'all', name: 'कुल (साझेदार)', invest: txt(sum(inv(pa))), spend: txt(sum(sp(pa))), total: txt(tot), entries: pa.length },
+        { kind: 'other', name: 'अन्य भुगतानकर्ता', invest: '0.00', spend: txt(sum(ot)), total: txt(sum(ot)), entries: ot.length }], error: null }; },
     sk_request_password_reset: a => { (S.resets = S.resets || []);
       if (!/^[a-z0-9][a-z0-9._+@-]{2,119}$/.test(String(a.p_login || '').trim().toLowerCase())) return err('यूज़र आईडी सही लिखें');
       S.resets.push({ id: S.resets.length + 1, login: a.p_login.trim().toLowerCase(), note: a.p_note, status: 'open', requested_at: now() }); return { data: null, error: null }; },

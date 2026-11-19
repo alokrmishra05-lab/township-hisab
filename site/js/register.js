@@ -1,6 +1,7 @@
 // सूर्य कुंज | निजी खर्च रजिस्टर — Supabase Auth + RLS + RPC + निजी storage
 // सारे अधिकार database में लागू हैं; यह UI केवल उन्हें आसान बनाता है।
 import { inspectFile, expectedMime, extOf } from './filecheck.js';
+import { makeReport, isNativeApp } from './report.js';
 import { ref, toPaise, paiseToText, rupee, toCsv, expensesCsv, csvActiveTotalPaise } from './money.js';
 
 const $ = id => document.getElementById(id);
@@ -111,6 +112,7 @@ function init() {
   $('openBtn').onclick = () => openByRef($('openRef').value);
   $('openRef').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); openByRef($('openRef').value); } });
   enableSwipe();
+  wireReport();
   refresh().catch(e => show('सेवा से संपर्क नहीं हुआ: ' + errText(e), 'error'));
 }
 
@@ -174,6 +176,7 @@ async function refreshInner() {
   $('tabs').querySelectorAll('button').forEach(b => b.onclick = () => { tab = b.dataset.t; refresh(); });
   $('tabs').querySelector('button.on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
   ['hisab', 'add', 'register', 'members', 'export'].forEach(v => $('v-' + v).hidden = v !== tab);
+  $('reportCard').hidden = tab !== 'hisab';
   if (!tabs.length) show('आपके पास अभी कोई अधिकार नहीं है। Admin से संपर्क करें।', 'error');
   $('summaryCard').hidden = !r.read;
   if (tab === 'hisab') await loadHisab();
@@ -431,6 +434,29 @@ function cancelDialog(r) {
       await afterChange(); return true;
     },
   });
+}
+
+// ---------- PDF रिपोर्ट
+function wireReport() {
+  $('rpAll').onclick = () => { $('rpFrom').value = ''; $('rpTo').value = ''; };
+  $('rpMake').onclick = async () => {
+    if (busy) return;
+    const from = $('rpFrom').value, to = $('rpTo').value;
+    if (from && to && from > to) { show('"से" तारीख "तक" से पहले की हो।', 'error'); return; }
+    if (isNativeApp()) {
+      $('rpStatus').innerHTML = 'ऐप के अंदर फ़ाइल डाउनलोड नहीं होती। <b>Chrome में खोलें</b> दबाएँ, वहाँ लॉगिन करके यही बटन दबाएँ — PDF फ़ोन में सेव हो जाएगी।<br><button type="button" id="rpOpen" class="secondary" style="margin-top:8px">Chrome में खोलें</button>';
+      $('rpOpen').onclick = () => window.open(location.origin + location.pathname, '_blank');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await makeReport(db, { from, to, details: $('rpDetails').checked, cancelled: $('rpCancelled').checked,
+        by: me?.display_name || '', when: new Date().toLocaleString('hi-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) },
+        t => { $('rpStatus').textContent = t; });
+      $('rpStatus').textContent = `PDF तैयार: ${r.name} (${r.pages} पृष्ठ, ${r.rows} एंट्री) — डाउनलोड फ़ोल्डर देखें।`;
+    } catch (err) { $('rpStatus').textContent = 'PDF नहीं बनी: ' + errText(err); }
+    finally { setBusy(false); }
+  };
 }
 
 // ---------- कुल हिसाब: साझेदार-वार निवेश + खर्च, तय हिस्सा और अंतर (database में गणना)

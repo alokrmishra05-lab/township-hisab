@@ -119,6 +119,18 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
     <h2>कुल हिसाब — साझेदार-वार</h2>
     <div id="hisabBox" class="muted"></div>
   </section>
+  <section id="reportCard" class="card" hidden>
+    <h2>PDF रिपोर्ट</h2>
+    <div class="grid">
+      <div><label for="rpFrom">से (तारीख)</label><input id="rpFrom" type="date"></div>
+      <div><label for="rpTo">तक (तारीख)</label><input id="rpTo" type="date"></div>
+    </div>
+    <label class="row" style="margin-top:10px;gap:8px;align-items:center"><input id="rpDetails" type="checkbox" checked> हर एंट्री की सूची भी</label>
+    <label class="row" style="gap:8px;align-items:center"><input id="rpCancelled" type="checkbox"> रद्द एंट्री भी (कटी हुई दिखेंगी)</label>
+    <div class="row" style="margin-top:10px"><button id="rpMake" type="button">PDF बनाएँ और डाउनलोड करें</button>
+      <button id="rpAll" type="button" class="secondary">पूरी अवधि</button></div>
+    <small id="rpStatus" class="muted">तारीख खाली छोड़ें तो शुरू से आज तक की रिपोर्ट बनेगी। रिपोर्ट इसी फ़ोन/कंप्यूटर में बनती है।</small>
+  </section>
 
   <section id="v-add" class="card" hidden>
     <h2>नया खर्च जोड़ें</h2>

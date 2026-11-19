@@ -301,6 +301,26 @@ with sync_playwright() as p:
     check('पहले टैब पर दाएँ swipe → वहीं रहता है', cur() == 'hisab', cur())
     check('swipe में JS त्रुटि नहीं', not errs, str(errs))
 
+    # PDF रिपोर्ट
+    pg, errs = open_as(p, 'admin')
+    check('PDF रिपोर्ट कार्ड "कुल हिसाब" टैब में', pg.is_visible('#reportCard') and pg.is_visible('#rpMake'))
+    with pg.expect_download(timeout=60000) as dl:
+        pg.click('#rpMake')
+    d = dl.value; path = d.path(); data = open(path, 'rb').read(); open(f'{SHOTS}/report.pdf', 'wb').write(data)
+    import re as _re
+    npages = len(_re.findall(rb'/Type\s*/Page[^s]', data))
+    check('PDF डाउनलोड: असली PDF, नाम सही, ≥2 पृष्ठ (सार + एंट्री)', data[:5] == b'%PDF-' and d.suggested_filename.startswith('surya-kunj-report-') and npages >= 2, f'{d.suggested_filename} pages={npages} size={len(data)}')
+    pg.wait_for_timeout(300)
+    check('PDF बनने के बाद संदेश और कोई अस्थायी पन्ना नहीं बचा', 'PDF तैयार' in pg.inner_text('#rpStatus') and pg.locator('.rp').count() == 0, pg.inner_text('#rpStatus'))
+    pg.fill('#rpFrom', '2026-12-01'); pg.fill('#rpTo', '2026-01-01'); pg.click('#rpMake'); pg.wait_for_timeout(300)
+    check('उलटी तारीखों पर रोक', 'पहले' in pg.inner_text('#message'))
+    pg.evaluate("window.Capacitor = { isNativePlatform: () => true }")
+    pg.click('#rpAll'); pg.click('#rpMake'); pg.wait_for_timeout(300)
+    check('APK के अंदर: "Chrome में खोलें" विकल्प (डाउनलोड नहीं)', pg.is_visible('#rpOpen') and 'Chrome' in pg.inner_text('#rpStatus'))
+    check('रिपोर्ट में JS त्रुटि नहीं', not errs, str(errs))
+    pg.click('#tabs button[data-t="register"]'); pg.wait_for_timeout(300)
+    check('दूसरे टैब पर रिपोर्ट कार्ड छिपा', not pg.is_visible('#reportCard'))
+
     # Dark + desktop
     pg, errs = open_as(p, 'admin', 1280, 900, dark=True)
     pg.click('#tabs button[data-t="register"]'); pg.wait_for_timeout(400)

@@ -48,6 +48,8 @@ jobs:
           KS_PASS: ${{ secrets.KHARCH_KEYSTORE_PASS }}
         run: |
           if [ -z "$KS_B64" ] || [ -z "$KS_PASS" ]; then echo "KHARCH_KEYSTORE_B64 / KHARCH_KEYSTORE_PASS secret नहीं मिले — रुक रहे हैं"; exit 1; fi
+          KS_PASS=$(printf %s "$KS_PASS" | tr -d " \r\n\t"); export KS_PASS
+          echo "पासवर्ड की लंबाई: ${#KS_PASS} (अपेक्षित 32)"
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon

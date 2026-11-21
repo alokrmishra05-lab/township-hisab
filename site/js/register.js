@@ -1,0 +1,649 @@
+// सूर्य कुंज | निजी खर्च रजिस्टर — Supabase Auth + RLS + RPC + निजी storage
+// सारे अधिकार database में लागू हैं; यह UI केवल उन्हें आसान बनाता है।
+import { inspectFile, expectedMime, extOf } from './filecheck.js';
+import { makeReport, isNativeApp, periodRange, TYPES } from './report.js';
+import { ref, toPaise, paiseToText, rupee, toCsv, expensesCsv, csvActiveTotalPaise } from './money.js';
+
+const $ = id => document.getElementById(id);
+const cfg = window.SK_REGISTER_CONFIG || {};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+export const CATEGORIES = ['भूमि खरीद', 'भूमि / रजिस्ट्री', 'दलाली / कमीशन', 'आर्किटेक्ट', 'मिट्टी भराई', 'मजदूरी', 'निर्माण सामग्री', 'बिजली / पानी',
+  'मशीन / वाहन', 'कार्यालय / यात्रा', 'लेआउट / स्वीकृति शुल्क', 'सड़क / प्लॉटिंग विकास',
+  'कानूनी / दस्तावेज़', 'साइट रखरखाव', 'अन्य'];
+const METHODS = ['नकद', 'UPI', 'बैंक ट्रांसफर', 'चेक', 'अन्य'];
+const BUCKET = 'sk-receipts';
+// यूज़र आईडी → अस्थायी (बिना inbox) ईमेल; SQL sk_login_email और Edge Function में भी यही नियम
+export const LOGIN_DOMAIN = 'suryakunj.example.com';
+export const loginEmail = id => { const v = String(id || '').trim().toLowerCase(); return v.includes('@') ? v : `${v}@${LOGIN_DOMAIN}`; };
+const LOGIN_RE = /^[a-z0-9][a-z0-9._-]{2,39}$/;
+const PIN_RE = /^\d{6}$/;
+const newPin = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return String(a[0] % 1000000).padStart(6, '0'); };
+async function adminCall(body) {
+  const { data, error } = await db.functions.invoke('sk-admin-users', { body });
+  if (error) {
+    let m = error.message;
+    try { const j = await error.context?.json?.(); if (j?.error) m = j.error; } catch { /* मूल संदेश */ }
+    throw Error(m);
+  }
+  if (data?.error) throw Error(data.error);
+  return data;
+}
+
+let db, user, me, busy = false, rows = [], receiptsByExp = new Map(), tab = null, tabKeys = [];
+
+function show(text, type = '') {
+  const m = $('message'); m.hidden = false; m.className = 'notice ' + type; m.textContent = text;
+  if (type === 'error') m.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+const errText = e => {
+  const msg = String(e?.message || e || 'अज्ञात त्रुटि');
+  if (/RECEIPT_LIMIT/.test(msg)) return 'इस खर्च में रसीद नहीं जुड़ सकती — अधिकतम 5 रसीदें हो चुकी हैं या अधिकार नहीं।';
+  if (/VERSION_CHANGED/.test(msg)) return 'आपके देखने के बाद यह खर्च बदला गया। सूची रिफ्रेश कर दी है — दोबारा देखें।';
+  if (/failed to fetch|network/i.test(msg)) return 'इंटरनेट/सेवा से संपर्क नहीं हुआ। दोबारा कोशिश करें।';
+  if (/invalid login/i.test(msg)) return 'यूज़र आईडी या पासवर्ड गलत है।';
+  return msg.replace(/^.*?ERROR:\s*/, '');
+};
+function setBusy(v) { busy = v; document.querySelectorAll('button').forEach(b => { if (!b.closest('#modal')) b.disabled = v; }); }
+function dialog({ title, html, ok = 'ठीक है', danger = false, onOk }) {
+  return new Promise(resolve => {
+    $('modalTitle').textContent = title; $('modalBody').innerHTML = html;
+    const okBtn = $('modalOk'); okBtn.textContent = ok; okBtn.className = danger ? 'danger' : ''; okBtn.disabled = false;
+    const close = v => { $('modal').hidden = true; okBtn.onclick = $('modalCancel').onclick = null; resolve(v); };
+    okBtn.onclick = async () => { okBtn.disabled = true; const r = onOk ? await onOk() : true; okBtn.disabled = false; if (r !== false) close(true); };
+    $('modalCancel').onclick = () => close(false);
+    $('modal').hidden = false; okBtn.focus();
+  });
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('modal').hidden) $('modalCancel').click(); });
+const todayIST = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const when = t => t ? new Date(t).toLocaleString('hi-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) : '';
+
+// ---------- प्रारंभ
+const validConfig = /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(cfg.url || '')
+  && typeof cfg.anonKey === 'string' && cfg.anonKey.length > 40 && !/PASTE|YOUR/i.test(cfg.anonKey + cfg.url);
+if (!validConfig || !window.supabase?.createClient) {
+  $('setup').hidden = false; $('boot').hidden = true;
+  if (validConfig) $('setup').textContent = 'ऑनलाइन सेवा लोड नहीं हुई। नेटवर्क जाँचकर पेज फिर खोलें।';
+} else {
+  db = window.supabase.createClient(cfg.url, cfg.anonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } });
+  init();
+}
+
+function fillSelect(el, items, first) {
+  el.innerHTML = (first ? `<option value="">${esc(first)}</option>` : '') + items.map(i => `<option>${esc(i)}</option>`).join('');
+}
+
+function init() {
+  fillSelect($('fCategory'), CATEGORIES, 'चुनें…'); fillSelect($('fMethod'), METHODS, 'चुनें…');
+  fillSelect($('qCategory'), CATEGORIES, 'सभी');
+  $('fDate').max = todayIST(); $('fDate').min = '2024-01-01'; $('fDate').value = todayIST();
+  $('authForm').onsubmit = async e => {
+    e.preventDefault(); if (busy) return; setBusy(true);
+    try {
+      const creds = { email: loginEmail($('email').value), password: $('password').value };
+      const { error } = await db.auth.signInWithPassword(creds); if (error) throw error;
+      $('password').value = ''; $('message').hidden = true; await refresh();
+    } catch (err) { show(errText(err), 'error'); } finally { setBusy(false); }
+  };
+  $('forgotBtn').onclick = () => { $('forgotForm').hidden = !$('forgotForm').hidden; $('forgotId').value = $('email').value.trim(); };
+  $('forgotForm').onsubmit = async e => {
+    e.preventDefault(); if (busy) return; setBusy(true);
+    try {
+      const { error } = await db.rpc('sk_request_password_reset', { p_login: $('forgotId').value.trim(), p_note: $('forgotNote').value.trim() || null });
+      if (error) throw error;
+      $('forgotForm').hidden = true; $('forgotNote').value = '';
+      show('अनुरोध Admin को भेज दिया गया। Admin नया पासवर्ड बताएँगे।', 'success');
+    } catch (err) { show(errText(err), 'error'); } finally { setBusy(false); }
+  };
+  $('signOut').onclick = async () => { await db.auth.signOut(); location.reload(); };
+  $('joinForm').onsubmit = async e => {
+    e.preventDefault(); if (busy) return; setBusy(true);
+    try {
+      const { error } = await db.rpc('sk_request_membership', { p_name: $('joinName').value.trim() });
+      if (error) throw error; show('अनुरोध भेज दिया गया। Admin की मंज़ूरी के बाद रजिस्टर खुलेगा।', 'success'); await refresh();
+    } catch (err) { show(errText(err), 'error'); } finally { setBusy(false); }
+  };
+  $('addForm').onsubmit = addExpense;
+  $('applyFilter').onclick = () => loadRegister();
+  $('clearFilter').onclick = () => { ['qFrom', 'qTo', 'qPayer'].forEach(i => $(i).value = ''); $('qCategory').value = ''; loadRegister(); };
+  $('csvExpenses').onclick = exportExpenses; $('csvAudit').onclick = exportAudit; $('csvMembers').onclick = exportMembers;
+  $('listReceipts').onclick = listAllReceipts;
+  $('openBtn').onclick = () => openByRef($('openRef').value);
+  $('openRef').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); openByRef($('openRef').value); } });
+  enableSwipe();
+  wireReport();
+  $('fCamera').onchange = () => { const f = $('fCamera').files[0]; $('fCamera').value = '';
+    if (!f) return; if (camShots.length >= 5) { show('एक बार में अधिकतम 5 रसीदें।', 'error'); return; }
+    camShots.push(cameraFile(f)); showCamShots(); };
+  refresh().catch(e => show('सेवा से संपर्क नहीं हुआ: ' + errText(e), 'error'));
+}
+
+// ---------- बाएँ/दाएँ swipe से टैब बदलना (फ़ॉर्म, खिसकने वाली तालिका या खुले संवाद पर नहीं)
+function scrollsSideways(el) {
+  for (let n = el; n && n !== document.body; n = n.parentElement) {
+    if (n.scrollWidth > n.clientWidth + 2 && /(auto|scroll)/.test(getComputedStyle(n).overflowX)) return true;
+  }
+  return false;
+}
+function enableSwipe() {
+  let x0 = null, y0 = 0, t0 = 0;
+  const area = $('workspace');
+  area.addEventListener('touchstart', e => {
+    const t = e.target;
+    if (e.touches.length !== 1 || !$('modal').hidden || busy || t.closest('input, textarea, select, .tabs') || scrollsSideways(t)) { x0 = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now();
+  }, { passive: true });
+  area.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; x0 = null;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || Date.now() - t0 > 700) return;
+    const i = tabKeys.indexOf(tab), j = dx < 0 ? i + 1 : i - 1;   // बाएँ swipe = अगला टैब
+    if (i < 0 || j < 0 || j >= tabKeys.length) return;
+    tab = tabKeys[j]; window.scrollTo({ top: 0 }); refresh();
+  }, { passive: true });
+}
+
+// हर बड़े कदम पर सदस्यता/अधिकार database से ताज़ा पढ़ें (Admin के बदलाव तुरंत लागू)
+async function refresh() {
+  try { return await refreshInner(); } finally { const b = $('boot'); if (b) b.hidden = true; }
+}
+async function refreshInner() {
+  const { data: { user: u } } = await db.auth.getUser();
+  user = u || null; me = null;
+  $('signOut').hidden = !user; $('loginBox').hidden = !!user;
+  if (!user) { $('joinBox').hidden = true; $('workspace').hidden = true; return; }
+  const { data, error } = await db.from('sk_members')
+    .select('display_name,status,is_admin,can_read,can_write,can_correct,decision_note').eq('user_id', user.id).maybeSingle();
+  if (error) { show('सदस्यता नहीं पढ़ सके: ' + errText(error), 'error'); return; }
+  me = data;
+  const active = me?.status === 'active';
+  $('joinBox').hidden = active; $('workspace').hidden = !active;
+  if (!active) {
+    const st = me?.status;
+    $('joinState').textContent = !me ? 'आप अभी सदस्य नहीं हैं। अपना नाम भेजकर अनुरोध करें।'
+      : st === 'pending' ? `अनुरोध Pending है ("${me.display_name}")। Admin की मंज़ूरी का इंतज़ार करें। नाम बदलना हो तो दोबारा भेजें।`
+      : st === 'rejected' ? 'आपका पिछला अनुरोध अस्वीकृत हुआ।' + (me.decision_note ? ` कारण: ${me.decision_note}` : '') + ' चाहें तो नया अनुरोध भेजें।'
+      : 'आपकी पहुँच हटा दी गई है। ज़रूरत हो तो Admin से बात करके नया अनुरोध भेजें।';
+    if (me?.display_name) $('joinName').value = me.display_name;
+    return;
+  }
+  const r = { read: me.is_admin || me.can_read, write: me.is_admin || me.can_write, correct: me.is_admin || me.can_correct };
+  $('identity').textContent = `${me.display_name} · ${me.is_admin ? 'Admin' : 'सदस्य'} · अधिकार: ` +
+    [r.read && 'Read', r.write && 'Write', r.correct && 'सुधार'].filter(Boolean).join(', ');
+  const tabs = [r.read && ['hisab', 'कुल हिसाब'], r.write && ['add', 'खर्च जोड़ें'], (r.read || r.correct) && ['register', 'रजिस्टर'],
+    me.is_admin && ['members', 'सदस्य'], me.is_admin && ['export', 'CSV / समापन']].filter(Boolean);
+  if (!tabs.some(t => t[0] === tab)) tab = tabs[0]?.[0] || null;
+  $('tabs').innerHTML = tabs.map(([k, t]) => `<button type="button" data-t="${k}" class="${k === tab ? 'on' : ''}">${t}</button>`).join('');
+  tabKeys = tabs.map(t => t[0]);
+  $('tabs').querySelectorAll('button').forEach(b => b.onclick = () => { tab = b.dataset.t; refresh(); });
+  $('tabs').querySelector('button.on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  ['hisab', 'add', 'register', 'members', 'export'].forEach(v => $('v-' + v).hidden = v !== tab);
+  $('reportCard').hidden = tab !== 'hisab';
+  if (!tabs.length) show('आपके पास अभी कोई अधिकार नहीं है। Admin से संपर्क करें।', 'error');
+  $('summaryCard').hidden = !r.read;
+  if (tab === 'hisab') await loadHisab();
+  if (tab === 'register') await loadRegister();
+  if (tab === 'members') await loadMembers();
+  await loadOpenSlots();
+}
+
+// ---------- खर्च जोड़ना
+// कैमरा की फ़ोटो का नाम कई बार बिना सही extension के आता है — type से नाम दें
+function cameraFile(f) {
+  const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[f.type];
+  if (/\.(jpe?g|png|webp)$/i.test(f.name) || !ext) return f;
+  return new File([f], `camera-${Date.now()}.${ext}`, { type: f.type, lastModified: f.lastModified });
+}
+let camShots = [];
+function showCamShots() {
+  $('camList').innerHTML = camShots.length ? `कैमरा से ${camShots.length} फ़ोटो: ` + camShots.map((f, i) => `${esc(f.name)} <button type="button" class="secondary camDel" data-i="${i}" style="padding:2px 8px">हटाएँ</button>`).join(' ') : '';
+  document.querySelectorAll('.camDel').forEach(b => b.onclick = () => { camShots.splice(Number(b.dataset.i), 1); showCamShots(); });
+}
+async function prepareFiles(list, extra = []) {
+  const files = [...Array.from(list || []), ...extra];
+  if (files.length > 5) throw Error('एक बार में अधिकतम 5 रसीदें।');
+  const out = [];
+  for (const f of files) {
+    const mime = expectedMime(f.name, f.type);
+    if (!mime) throw Error(`"${f.name}": केवल JPG, PNG, WEBP, PDF, DOCX।`);
+    const r = inspectFile(new Uint8Array(await f.arrayBuffer()), f.name);
+    if (!r.ok) throw Error(`"${f.name}": ${r.reason}`);
+    out.push({ file: f, mime: r.mime, ext: extOf(f.name) === 'jpeg' ? 'jpg' : extOf(f.name) });
+  }
+  return out;
+}
+
+// हर फ़ाइल: (1) server पर जगह आरक्षित → path  (2) उसी path पर upload  (3) attach।
+// upload विफल हो तो जगह तुरंत छोड़ी जाती है; attach विफल हो तो फ़ाइल "अधूरे अपलोड" में दिखती है।
+async function uploadReceipts(expenseId, files) {
+  let ok = 0;
+  for (const { file, mime, ext } of files) {
+    const { data: path, error: rErr } = await db.rpc('sk_reserve_receipt_slot', { p_expense_id: expenseId, p_ext: ext });
+    if (rErr) throw Error(`"${file.name}": ${errText(rErr)}`);
+    const { error: upErr } = await db.storage.from(BUCKET).upload(path, file, { upsert: false, contentType: mime, cacheControl: '0' });
+    if (upErr) {
+      await db.rpc('sk_release_receipt_slot', { p_storage_path: path });   // फ़ाइल नहीं चढ़ी: जगह वापस
+      throw Error(`"${file.name}" अपलोड नहीं हुई: ${errText(upErr)} — उसकी जगह वापस कर दी गई।`);
+    }
+    const { data: rid, error: aErr } = await db.rpc('sk_attach_receipt', { p_expense_id: expenseId, p_storage_path: path, p_original_filename: file.name.slice(0, 255) });
+    if (aErr) throw Error(`"${file.name}" चढ़ गई पर खर्च से नहीं जुड़ी: ${errText(aErr)} — ऊपर "अधूरे अपलोड" से जोड़ें या हटाएँ।`);
+    ok++;
+    db.functions.invoke('verify-receipt', { body: { receipt_id: rid } }).catch(() => {}); // जाँच server पर; विफलता से एंट्री नहीं रुकती
+  }
+  return ok;
+}
+
+// ---------- अधूरे अपलोड (अपने): जोड़ें / हटाएँ / जगह छोड़ें
+async function loadOpenSlots() {
+  const box = $('openSlots');
+  const { data, error } = await db.rpc('sk_my_open_slots');
+  if (error || !data?.length) { box.hidden = true; box.innerHTML = ''; return; }
+  box.hidden = false;
+  box.innerHTML = `<b>अधूरे अपलोड (${data.length})</b><small>ये जगहें घिरी हैं (प्रति खर्च अधिकतम 5)। फ़ाइल चढ़ चुकी हो तो जोड़ें या हटाएँ; न चढ़ी हो तो जगह छोड़ें।</small>` +
+    data.map(s => `<div class="row" style="margin-top:8px"><span>${ref(s.ref_no)} · ${s.uploaded ? 'फ़ाइल चढ़ी, जुड़ी नहीं' : 'फ़ाइल नहीं चढ़ी'}</span>
+      ${s.uploaded ? `<button type="button" class="secondary slotAttach" data-p="${esc(s.storage_path)}" data-e="${esc(s.expense_id)}">जोड़ें</button>
+        <button type="button" class="secondary slotDelete" data-p="${esc(s.storage_path)}">हटाएँ</button>`
+      : `<button type="button" class="secondary slotRelease" data-p="${esc(s.storage_path)}">जगह छोड़ें</button>`}</div>`).join('');
+  const act = async (fn, okMsg) => { setBusy(true); try { await fn(); show(okMsg, 'success'); } catch (e) { show(errText(e), 'error'); } finally { setBusy(false); await loadOpenSlots(); } };
+  box.querySelectorAll('.slotAttach').forEach(b => b.onclick = () => act(async () => {
+    const { error } = await db.rpc('sk_attach_receipt', { p_expense_id: b.dataset.e, p_storage_path: b.dataset.p, p_original_filename: 'अधूरा अपलोड' });
+    if (error) throw error; }, 'अधूरी फ़ाइल खर्च से जुड़ गई।'));
+  box.querySelectorAll('.slotDelete').forEach(b => b.onclick = () => act(async () => {
+    const { error } = await db.storage.from(BUCKET).remove([b.dataset.p]); if (error) throw error;
+    const { error: e2 } = await db.rpc('sk_release_receipt_slot', { p_storage_path: b.dataset.p }); if (e2) throw e2; }, 'अधूरी फ़ाइल हटाई, जगह वापस।'));
+  box.querySelectorAll('.slotRelease').forEach(b => b.onclick = () => act(async () => {
+    const { error } = await db.rpc('sk_release_receipt_slot', { p_storage_path: b.dataset.p }); if (error) throw error; }, 'जगह वापस।'));
+}
+
+async function addExpense(e) {
+  e.preventDefault(); if (busy) return;
+  try {
+    const d = $('fDate').value, paise = toPaise($('fAmount').value);
+    if (!d || d > todayIST()) throw Error('सही तारीख भरें (भविष्य की नहीं)।');
+    if (paise === null || paise <= 0n || paise > 10000000000n) throw Error('राशि सही भरें: जैसे 2450 या 2450.50 (अधिकतम ₹10 करोड़, दो दशमलव तक)।');
+    const item = $('fItem').value.trim(), payer = $('fPayer').value.trim();
+    if (!$('fCategory').value || !$('fMethod').value || item.length < 2 || payer.length < 2) throw Error('सभी * वाले खाने भरें।');
+    const files = await prepareFiles($('fReceipt').files, camShots);
+    setBusy(true);
+    const { data, error } = await db.rpc('sk_add_expense', { p_date: d, p_item: item, p_category: $('fCategory').value,
+      p_amount: paiseToText(paise), p_payer: payer, p_method: $('fMethod').value });
+    if (error) throw error;
+    const added = Array.isArray(data) ? data[0] : data;
+    let msg = `${ref(added.ref_no)} सहेजा गया: ${rupee(paise)}।`;
+    if (files.length) {
+      try { msg += ` ${await uploadReceipts(added.id, files)} रसीद जुड़ी।`; }
+      catch (err) { show(`${msg}\nपर रसीद पूरी नहीं जुड़ी — ${err.message}\nखर्च सुरक्षित है; सुधार-अधिकार वाला सदस्य या Admin "रसीद जोड़ें" से बाद में जोड़ सकता है।`, 'error'); return; }
+    }
+    $('addForm').reset(); $('fDate').value = todayIST(); camShots = []; showCamShots();
+    $('addedList').insertAdjacentHTML('afterbegin', `<div>✓ ${esc(msg)}</div>`);
+    show(msg, 'success');
+  } catch (err) { show(errText(err), 'error'); } finally { setBusy(false); }
+}
+
+// ---------- रजिस्टर: फ़िल्टर, कुल, सूची
+const filters = () => ({ from: $('qFrom').value || null, to: $('qTo').value || null,
+  cat: $('qCategory').value || null, payer: $('qPayer').value.trim() || null });
+
+const RC = { verified: ['', 'जाँची ✓'], rejected: ['b-no', 'अमान्य'], pending: ['b-warn', 'जाँच बाकी'] };
+function card(r, recs, canCorrect, histHtml = null) {
+  const rec = recs.map(p => `<button type="button" class="secondary rcBtn" data-path="${esc(p.storage_path)}" style="margin:6px 6px 0 0">📎 ${esc(p.original_filename)}</button>` +
+    `<span class="badge ${RC[p.verification_status][0]}">${RC[p.verification_status][1]}</span>`).join(' ');
+  const slots = 5 - recs.length;
+  return `<div class="item ${r.status}" id="it-${esc(r.id)}">
+    <div class="row"><b>${esc(r.item)}</b><span class="amount">${rupee(r.amount)}</span></div>
+    ${r.status === 'cancelled' ? `<span class="badge b-no">रद्द</span> <small>कारण: ${esc(r.cancel_reason)}</small>` : ''}
+    <span class="ref">${ref(r.ref_no)} · ${esc(r.expense_date)} · ${esc(r.category)} · ${esc(r.payer)} · ${esc(r.payment_method)}</span>
+    <small>दर्ज: ${esc(r.created_by_name)}, ${when(r.created_at)}${r.updated_by_name && r.updated_at !== r.created_at ? ` · अंतिम बदलाव: ${esc(r.updated_by_name)}, ${when(r.updated_at)}` : ''}</small>
+    <div>${rec}</div>
+    <div class="row" style="margin-top:8px">
+      ${canCorrect && r.status === 'active' ? `<button type="button" class="secondary fixBtn" data-id="${esc(r.id)}">सुधारें</button>
+        <button type="button" class="secondary cancelBtn" data-id="${esc(r.id)}">रद्द करें</button>
+        ${slots > 0 ? `<button type="button" class="secondary addRcBtn" data-id="${esc(r.id)}" data-n="${recs.length}">रसीद जोड़ें (${recs.length}/5)</button>` : '<small>5/5 रसीदें — सीमा पूरी</small>'}` : ''}
+      ${histHtml === null ? `<button type="button" class="secondary histBtn" data-id="${esc(r.id)}" style="flex:0 0 auto">इतिहास</button>` : ''}
+    </div><div class="audit" id="au-${esc(r.id)}"${histHtml === null ? ' hidden' : ''}>${histHtml ?? ''}</div></div>`;
+}
+function bindCards(list) {
+  const find = id => list.find(x => x.id === id);
+  document.querySelectorAll('.rcBtn').forEach(b => b.onclick = () => openReceipt(b));
+  document.querySelectorAll('.fixBtn').forEach(b => b.onclick = () => correctDialog(find(b.dataset.id)));
+  document.querySelectorAll('.cancelBtn').forEach(b => b.onclick = () => cancelDialog(find(b.dataset.id)));
+  document.querySelectorAll('.histBtn').forEach(b => b.onclick = () => toggleHistory(b.dataset.id));
+  document.querySelectorAll('.addRcBtn').forEach(b => b.onclick = () => addReceiptDialog(find(b.dataset.id), Number(b.dataset.n)));
+}
+const canRead = () => me.is_admin || me.can_read;
+const canCorrect = () => me.is_admin || me.can_correct;
+
+async function loadRegister() {
+  // पूरी सूची/कुल/फ़िल्टर केवल Read से; केवल-सुधार वाला क्रमांक से एक खर्च खोलता है
+  $('openBox').hidden = canRead() || !canCorrect();
+  $('filterCard').hidden = $('listCard').hidden = $('summaryCard').hidden = !canRead();
+  openedRef = null;
+  if (!canRead()) return;
+  const f = filters();
+  let qy = db.from('sk_expenses').select('id,ref_no,expense_date,item,category,amount,payer,payment_method,status,version,created_by,created_by_name,created_at,updated_by_name,updated_at,cancel_reason,cancelled_at')
+    .order('expense_date', { ascending: false }).order('ref_no', { ascending: false }).limit(2000);
+  if (f.from) qy = qy.gte('expense_date', f.from); if (f.to) qy = qy.lte('expense_date', f.to);
+  if (f.cat) qy = qy.eq('category', f.cat); if (f.payer) qy = qy.eq('payer', f.payer);
+  const [{ data, error }, { data: rc }] = await Promise.all([qy, db.from('sk_receipts').select('id,expense_id,storage_path,original_filename,verification_status,verification_note')]);
+  if (error) { show('रजिस्टर नहीं खुला: ' + errText(error), 'error'); return; }
+  rows = data || [];
+  receiptsByExp = new Map(); (rc || []).forEach(r => { if (!receiptsByExp.has(r.expense_id)) receiptsByExp.set(r.expense_id, []); receiptsByExp.get(r.expense_id).push(r); });
+  await loadSummary(f);
+  $('listTitle').textContent = `खर्च (${rows.length})`;
+  $('entries').innerHTML = rows.map(r => card(r, receiptsByExp.get(r.id) || [], canCorrect())).join('') || 'इस फ़िल्टर में कोई खर्च नहीं।';
+  bindCards(rows);
+}
+
+// ---------- केवल-सुधार: क्रमांक से एक खर्च (हर खोलना server पर दर्ज)
+let openedRef = null;
+const HIST = { created: 'दर्ज', corrected: 'सुधारा', cancelled: 'रद्द', receipt_attached: 'रसीद जुड़ी', receipt_verified: 'रसीद जाँची ✓', receipt_rejected: 'रसीद अमान्य' };
+const FIELDS = { expense_date: 'तारीख', item: 'मद', category: 'श्रेणी', amount: 'राशि', payer: 'भुगतानकर्ता', payment_method: 'तरीका' };
+function historyHtml(list) {
+  return (list || []).map(a => {
+    const diff = a.action === 'corrected' && a.old_data && a.new_data ? Object.keys(FIELDS).filter(k => String(a.old_data[k]) !== String(a.new_data[k]))
+      .map(k => `${FIELDS[k]}: ${esc(k === 'amount' ? rupee(a.old_data[k]) : a.old_data[k])} → ${esc(k === 'amount' ? rupee(a.new_data[k]) : a.new_data[k])}`).join('; ') : '';
+    return `${when(a.at)} — <b>${HIST[a.action] || esc(a.action)}</b> (${esc(a.actor_name || '')})${a.reason ? ' · कारण: ' + esc(a.reason) : ''}${diff ? '<br>' + diff : ''}`;
+  }).join('<br>') || 'कोई रिकॉर्ड नहीं';
+}
+async function openByRef(raw) {
+  const n = Number(String(raw ?? '').trim().replace(/^SK-?/i, ''));
+  if (!Number.isInteger(n) || n <= 0) { show('सही क्रमांक डालें, जैसे SK-000012 या 12।', 'error'); return; }
+  const { data, error } = await db.rpc('sk_open_for_correction', { p_ref_no: n });
+  if (error) { $('openResult').innerHTML = ''; openedRef = null; show(errText(error), 'error'); await refresh(); return; }
+  openedRef = n;
+  const r = data.expense;
+  $('openResult').innerHTML = card(r, data.receipts || [], true, historyHtml(data.history));
+  bindCards([r]);
+}
+async function afterChange() {
+  if (openedRef !== null && !canRead()) { const n = openedRef; await refresh(); await openByRef(n); }
+  else await refresh();
+}
+
+async function loadSummary(f) {
+  const { data, error } = await db.rpc('sk_summary', { p_from: f.from, p_to: f.to, p_category: f.cat, p_payer: f.payer });
+  if (error) { $('totals').textContent = errText(error); return null; }
+  const pick = k => (data || []).filter(x => x.kind === k);
+  const t = pick('total')[0] || { entries: 0, total: '0' }, c = pick('cancelled')[0] || { entries: 0, total: '0' };
+  $('totals').innerHTML = `<div><span>सक्रिय कुल (${t.entries})</span><b id="activeTotal">${rupee(t.total)}</b></div>
+    <div><span>रद्द (${c.entries}) — कुल से बाहर</span><b>${rupee(c.total)}</b></div>`;
+  const tbl = list => `<tr><th></th><th class="n">एंट्री</th><th class="n">राशि</th></tr>` +
+    list.map(x => `<tr><td>${esc(x.key)}</td><td class="n">${x.entries}</td><td class="n">${rupee(x.total)}</td></tr>`).join('');
+  $('byMonth').innerHTML = tbl(pick('month')); $('byCategory').innerHTML = tbl(pick('category'));
+  return t;
+}
+
+async function openReceipt(b) {
+  b.disabled = true;
+  try {
+    const { data, error } = await db.storage.from(BUCKET).createSignedUrl(b.dataset.path, 60);
+    if (error) throw error; window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+  } catch (e) { show('रसीद नहीं खुली: ' + errText(e), 'error'); } finally { b.disabled = false; }
+}
+
+async function toggleHistory(id) {
+  const box = $('au-' + id);
+  if (!box.hidden) { box.hidden = true; return; }
+  const { data, error } = await db.from('sk_expense_audit').select('action,actor_name,at,reason,old_data,new_data').eq('expense_id', id).order('at');
+  box.innerHTML = error ? esc(errText(error)) : historyHtml(data);
+  box.hidden = false;
+}
+
+function addReceiptDialog(r, have) {
+  if (!r) return;
+  const rcShots = [];
+  setTimeout(() => { const c = $('rcCamera'); if (c) c.onchange = () => { const f = c.files[0]; c.value = ''; if (!f) return;
+    rcShots.push(cameraFile(f)); $('rcCamList').textContent = `कैमरा से ${rcShots.length} फ़ोटो जुड़ने को तैयार`; }; }, 0);
+  dialog({
+    title: `रसीद जोड़ें: ${ref(r.ref_no)}`, ok: 'जोड़ें',
+    html: `<p>इस खर्च में ${have}/5 रसीदें हैं; अधिकतम ${5 - have} और जुड़ सकती हैं। जुड़ने के बाद रसीद बदली/हटाई नहीं जा सकती और बदलाव-रिकॉर्ड में दर्ज होती है।</p>
+      <label for="rcCamera" class="btnlike secondary" style="margin-bottom:8px">📷 कैमरा से फ़ोटो</label><input id="rcCamera" type="file" accept="image/*" capture="environment" class="vh">
+      <div id="rcCamList" class="muted"></div>
+      <input id="rcFiles" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">`,
+    onOk: async () => {
+      try {
+        const files = await prepareFiles($('rcFiles').files, rcShots);
+        if (!files.length) { $('rcFiles').focus(); return false; }
+        if (have + files.length > 5) throw Error(`अधिकतम 5 रसीदें — अभी केवल ${5 - have} और जुड़ सकती हैं।`);
+        const n = await uploadReceipts(r.id, files);
+        show(`${ref(r.ref_no)} में ${n} रसीद जुड़ी।`, 'success');
+      } catch (e) { show(errText(e), 'error'); }
+      await afterChange(); return true;
+    },
+  });
+}
+
+function correctDialog(r) {
+  if (!r) return;
+  const sel = (items, v) => items.map(i => `<option${i === v ? ' selected' : ''}>${esc(i)}</option>`).join('');
+  dialog({
+    title: `सुधार: ${ref(r.ref_no)}`, ok: 'सुधार सहेजें',
+    html: `<div class="grid"><div><label for="cDate">तारीख</label><input id="cDate" type="date" max="${todayIST()}" value="${esc(r.expense_date)}"></div>
+      <div><label for="cAmount">राशि (₹)</label><input id="cAmount" inputmode="decimal" value="${esc(paiseToText(toPaise(Number(r.amount).toFixed(2))))}"></div>
+      <div><label for="cCategory">श्रेणी</label><select id="cCategory">${sel(CATEGORIES, r.category)}</select></div>
+      <div><label for="cMethod">तरीका</label><select id="cMethod">${sel(METHODS, r.payment_method)}</select></div></div>
+      <label for="cItem">मद</label><input id="cItem" maxlength="200" value="${esc(r.item)}">
+      <label for="cPayer">भुगतानकर्ता</label><input id="cPayer" maxlength="100" list="payers" value="${esc(r.payer)}">
+      <label for="cReason">सुधार का कारण * (कम से कम 5 अक्षर)</label><textarea id="cReason" maxlength="500"></textarea>
+      <small>पुरानी और नई जानकारी, आपका नाम और समय रिकॉर्ड में सुरक्षित रहेंगे। यही संस्करण (${r.version}) बदलेगा।</small>`,
+    onOk: async () => {
+      const p = toPaise($('cAmount').value), reason = $('cReason').value.trim();
+      if (reason.length < 5) { $('cReason').focus(); return false; }
+      if (p === null || p <= 0n) { $('cAmount').focus(); return false; }
+      const { error } = await db.rpc('sk_correct_expense', { p_id: r.id, p_expected_version: r.version, p_date: $('cDate').value,
+        p_item: $('cItem').value.trim(), p_category: $('cCategory').value, p_amount: paiseToText(p), p_payer: $('cPayer').value.trim(),
+        p_method: $('cMethod').value, p_reason: reason });
+      if (error) show('सुधार नहीं हुआ: ' + errText(error), 'error'); else show(`${ref(r.ref_no)} सुधारा गया।`, 'success');
+      await afterChange(); return true;
+    },
+  });
+}
+
+function cancelDialog(r) {
+  if (!r) return;
+  dialog({
+    title: `रद्द करें: ${ref(r.ref_no)} (${rupee(r.amount)})`, ok: 'रद्द करें', danger: true,
+    html: `<p>रद्द खर्च रिकॉर्ड में दिखता रहेगा, पर सक्रिय कुल से बाहर हो जाएगा। यह वापस नहीं होगा।</p>
+      <label for="xReason">रद्द करने का कारण * (कम से कम 5 अक्षर)</label><textarea id="xReason" maxlength="500"></textarea>`,
+    onOk: async () => {
+      const reason = $('xReason').value.trim(); if (reason.length < 5) { $('xReason').focus(); return false; }
+      const { error } = await db.rpc('sk_cancel_expense', { p_id: r.id, p_expected_version: r.version, p_reason: reason });
+      if (error) show('रद्द नहीं हुआ: ' + errText(error), 'error'); else show(`${ref(r.ref_no)} रद्द किया गया।`, 'success');
+      await afterChange(); return true;
+    },
+  });
+}
+
+// ---------- PDF रिपोर्ट
+function wireReport() {
+  const sync = () => document.querySelectorAll('.rpCustom').forEach(d => d.hidden = $('rpPeriod').value !== 'custom');
+  $('rpPeriod').onchange = sync; sync();
+  $('rpCategory').innerHTML = '<option value="">सभी</option>' + CATEGORIES.map(c => `<option>${esc(c)}</option>`).join('');
+  $('rpPayer').innerHTML = '<option value="">सभी</option>' + [...document.querySelectorAll('#payers option')].map(o => `<option>${esc(o.value)}</option>`).join('');
+  $('rpMake').onclick = async () => {
+    if (busy) return;
+    const per = periodRange($('rpPeriod').value, todayIST(), $('rpFrom').value, $('rpTo').value);
+    if ($('rpPeriod').value === 'custom' && (!per.from || !per.to)) { show('कस्टम अवधि में "से" और "तक" दोनों तारीख भरें।', 'error'); return; }
+    if (per.from && per.to && per.from > per.to) { show('"से" तारीख "तक" से पहले की हो।', 'error'); return; }
+    if (isNativeApp()) {
+      $('rpStatus').innerHTML = 'ऐप के अंदर फ़ाइल डाउनलोड नहीं होती। <b>Chrome में खोलें</b> दबाएँ, वहाँ लॉगिन करके यही बटन दबाएँ — PDF फ़ोन में सेव हो जाएगी।<br><button type="button" id="rpOpen" class="secondary" style="margin-top:8px">Chrome में खोलें</button>';
+      $('rpOpen').onclick = () => window.open(location.origin + location.pathname, '_blank');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await makeReport(db, { ...per, type: $('rpType').value, payer: $('rpPayer').value, category: $('rpCategory').value,
+        details: $('rpDetails').checked, cancelled: $('rpCancelled').checked,
+        by: me?.display_name || '', when: new Date().toLocaleString('hi-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) },
+        t => { $('rpStatus').textContent = t; });
+      $('rpStatus').textContent = `${TYPES[$('rpType').value]} तैयार: ${r.name} (${r.pages} पृष्ठ, ${r.rows} एंट्री) — डाउनलोड फ़ोल्डर देखें।`;
+    } catch (err) { $('rpStatus').textContent = 'PDF नहीं बनी: ' + errText(err); }
+    finally { setBusy(false); }
+  };
+}
+
+// ---------- कुल हिसाब: साझेदार-वार निवेश + खर्च, तय हिस्सा और अंतर (database में गणना)
+async function loadHisab() {
+  $('hisabBox').textContent = 'लोड हो रहा है…';
+  const { data, error } = await db.rpc('sk_partner_summary');
+  if (error) { $('hisabBox').textContent = errText(error); return; }
+  const P = v => { const t = String(v ?? '0').trim(), neg = t.startsWith('-'); const p = toPaise(neg ? t.slice(1) : t) ?? 0n; return neg ? -p : p; };
+  const all = data.find(x => x.kind === 'all'), other = data.find(x => x.kind === 'other');
+  const ORDER = ['आलोक रंजन मिश्र', 'अमरनाथ पाण्डेय', 'गगन आचारी'], pos = n => { const i = ORDER.indexOf(n); return i < 0 ? 99 : i; };
+  const partners = data.filter(x => x.kind === 'partner').sort((a, b) => pos(a.name) - pos(b.name) || a.name.localeCompare(b.name));
+  const sign = v => { const p = P(v); return p > 0n ? `<b class="pos">+${rupee(p)}</b> <small>लेना है</small>` : p < 0n ? `<b class="neg">−${rupee(-p)}</b> <small>देना है</small>` : '<b>बराबर</b>'; };
+  $('hisabBox').innerHTML = `<div class="totals"><div><small>कुल (साझेदारों से)</small><b>${rupee(P(all?.total))}</b></div>
+      <div><small>निवेश (भूमि खरीद)</small><b>${rupee(P(all?.invest))}</b></div><div><small>बाकी खर्च</small><b>${rupee(P(all?.spend))}</b></div></div>
+    ${partners.map(x => `<div class="item"><b>${esc(x.name)}</b> <small>हिस्सा ${(Number(x.share) * 100).toFixed(2)}% · ${x.entries} एंट्री</small>
+      <table><tr><td>निवेश</td><td>${rupee(P(x.invest))}</td></tr><tr><td>खर्च</td><td>${rupee(P(x.spend))}</td></tr>
+      <tr><td><b>कुल योगदान</b></td><td><b>${rupee(P(x.total))}</b></td></tr><tr><td>तय हिस्सा</td><td>${rupee(P(x.due))}</td></tr>
+      <tr><td>अंतर</td><td>${sign(x.diff)}</td></tr></table></div>`).join('')}
+    ${P(other?.total) > 0n ? `<div class="notice">अन्य भुगतानकर्ता (जैसे साइट कैश): ${rupee(P(other.total))} · ${other.entries} एंट्री — यह साझेदारों के हिस्से में नहीं जुड़ा।</div>` : ''}
+    <small>"भूमि खरीद" श्रेणी = निवेश, बाकी = खर्च। केवल सक्रिय (रद्द नहीं) एंट्री गिनी जाती हैं। "अंतर" = साझेदार का कुल योगदान − कुल राशि में उसका तय हिस्सा; + वाले को बाकी साझेदारों से लेना है, − वाले को देना है।</small>`;
+}
+
+// ---------- Admin: सदस्य
+async function loadMembers() {
+  const { data, error } = await db.from('sk_members').select('user_id,display_name,status,is_admin,can_read,can_write,can_correct,requested_at,decided_at,decision_note').order('requested_at');
+  if (error) { show(errText(error), 'error'); return; }
+  const box = (m, pre) => `<span class="rights">${[['r', 'Read', m.can_read], ['w', 'Write', m.can_write], ['c', 'सुधार', m.can_correct]]
+    .map(([k, t, v]) => `<label><input type="checkbox" id="${pre}${k}-${esc(m.user_id)}"${v ? ' checked' : ''}> ${t}</label>`).join('')}</span>`;
+  const pend = data.filter(m => m.status === 'pending'), act = data.filter(m => m.status === 'active'), closed = data.filter(m => ['rejected', 'removed'].includes(m.status));
+  $('pendingList').innerHTML = pend.map(m => `<div class="item"><b>${esc(m.display_name)}</b> <small>अनुरोध: ${when(m.requested_at)}</small>
+      ${box({ ...m, can_read: true }, 'p')}<input id="pn-${esc(m.user_id)}" placeholder="टिप्पणी (वैकल्पिक)" maxlength="300">
+      <div class="row" style="margin-top:8px"><button type="button" class="apBtn" data-u="${esc(m.user_id)}">मंज़ूर करें</button>
+      <button type="button" class="secondary rjBtn" data-u="${esc(m.user_id)}">अस्वीकार करें</button></div></div>`).join('') || 'कोई pending अनुरोध नहीं।';
+  $('activeList').innerHTML = act.map(m => `<div class="item"><b>${esc(m.display_name)}</b>${m.is_admin ? ' <span class="badge">Admin</span>' : ''}
+      ${m.is_admin ? '<small>Admin के सभी अधिकार स्थायी हैं।</small>' : `${box(m, 'a')}
+      <div class="row"><button type="button" class="secondary saveBtn" data-u="${esc(m.user_id)}">अधिकार सहेजें</button>
+      <button type="button" class="secondary pinBtn" data-u="${esc(m.user_id)}">पासवर्ड बदलें</button>
+      <button type="button" class="danger rmBtn" data-u="${esc(m.user_id)}">पहुँच हटाएँ</button></div>`}</div>`).join('');
+  $('closedList').innerHTML = closed.map(m => `<div>${esc(m.display_name)} — ${m.status === 'rejected' ? 'अस्वीकृत' : 'हटाया गया'} ${when(m.decided_at)}${m.decision_note ? ' · ' + esc(m.decision_note) : ''}</div>`).join('') || 'कोई नहीं।';
+  const rights = (u, pre) => ['r', 'w', 'c'].map(k => $(`${pre}${k}-${u}`).checked);
+  const call = async (fn, args, okMsg) => {
+    setBusy(true);
+    try { const { error } = await db.rpc(fn, args); if (error) throw error; show(okMsg, 'success'); }
+    catch (e) { show(errText(e), 'error'); } finally { setBusy(false); await loadMembers(); }
+  };
+  const byId = new Map(data.map(m => [m.user_id, m]));
+  // सुधार अधिकार नया दिया जा रहा हो तो दायरा साफ़ दिखाकर पुष्टि
+  const confirmCorrect = async (u, r, c) => {
+    if (!c || byId.get(u)?.can_correct) return true;
+    return dialog({ title: `${byId.get(u)?.display_name || ''} को सुधार अधिकार?`, ok: 'हाँ, सुधार अधिकार दें',
+      html: `<div class="notice">सुधार <b>सभी खर्चों पर लागू</b> है: यह सदस्य किसी भी खर्च को क्रमांक से खोलकर बदल सकेगा या कारण देकर रद्द कर सकेगा, और उसकी रसीदें देख/जोड़ सकेगा।</div>
+        <p>${r ? 'Read भी साथ है, इसलिए सभी खर्च और सभी रसीदें सूची में दिखेंगी।' : 'Read नहीं है: पूरी सूची, कुल और फ़िल्टर नहीं दिखेंगे; हर खर्च क्रमांक से खोलना होगा और हर खोलना दर्ज होगा।'}</p>
+        <small>हर सुधार/रद्द में कारण अनिवार्य है और पुरानी-नई जानकारी रिकॉर्ड में रहती है। अधिकार कभी भी वापस लिया जा सकता है।</small>` });
+  };
+  document.querySelectorAll('.apBtn').forEach(b => b.onclick = async () => {
+    const [r, w, c] = rights(b.dataset.u, 'p');
+    if (!(r || w || c)) { show('कम से कम एक अधिकार चुनें।', 'error'); return; }
+    if (!(await confirmCorrect(b.dataset.u, r, c))) return;
+    call('sk_admin_decide', { p_user: b.dataset.u, p_approve: true, p_read: r, p_write: w, p_correct: c, p_note: $('pn-' + b.dataset.u).value || null }, 'सदस्य मंज़ूर।');
+  });
+  document.querySelectorAll('.rjBtn').forEach(b => b.onclick = () =>
+    call('sk_admin_decide', { p_user: b.dataset.u, p_approve: false, p_read: false, p_write: false, p_correct: false, p_note: $('pn-' + b.dataset.u).value || null }, 'अनुरोध अस्वीकृत।'));
+  document.querySelectorAll('.saveBtn').forEach(b => b.onclick = async () => {
+    const [r, w, c] = rights(b.dataset.u, 'a');
+    if (!(await confirmCorrect(b.dataset.u, r, c))) return;
+    call('sk_admin_set_rights', { p_user: b.dataset.u, p_read: r, p_write: w, p_correct: c, p_note: null }, 'अधिकार बदले — सदस्य की अगली कार्रवाई से लागू।');
+  });
+  document.querySelectorAll('.rmBtn').forEach(b => b.onclick = () => dialog({
+    title: 'पहुँच हटाएँ?', danger: true, ok: 'हटाएँ',
+    html: '<p>सदस्य तुरंत खर्च और रसीदें नहीं देख पाएगा। उसकी पुरानी एंट्रियाँ रिकॉर्ड में रहेंगी।</p><label for="rmNote">कारण (वैकल्पिक)</label><input id="rmNote" maxlength="300">',
+    onOk: async () => { await call('sk_admin_remove', { p_user: b.dataset.u, p_note: $('rmNote').value || null }, 'पहुँच हटा दी गई।'); return true; },
+  }));
+  // नया सदस्य (Admin खाता बनाता है)
+  $('nmGen').onclick = () => { $('nmPin').value = newPin(); };
+  if (!$('nmPin').value) $('nmPin').value = newPin();
+  $('newMember').onsubmit = async e => {
+    e.preventDefault(); if (busy) return;
+    const login = $('nmLogin').value.trim().toLowerCase(), name = $('nmName').value.trim(), pin = $('nmPin').value.trim();
+    const role = { partner: [true, true, false], assistant: [false, true, false], reader: [true, false, false] }[$('nmRole').value];
+    if (!LOGIN_RE.test(login)) { show('यूज़र आईडी 3–40 अक्षर: छोटे अंग्रेज़ी अक्षर, अंक, . _ -', 'error'); return; }
+    if (!PIN_RE.test(pin)) { show('पासवर्ड ठीक 6 अंकों का हो।', 'error'); return; }
+    setBusy(true);
+    try {
+      await adminCall({ action: 'create', login, name, password: pin, read: role[0], write: role[1], correct: role[2] });
+      $('newMember').reset(); $('nmPin').value = newPin();
+      await dialog({ title: 'सदस्य बन गया', html: `<p><b>${esc(name)}</b> का खाता बन गया। ये जानकारी सदस्य को स्वयं बताएँ:</p>
+        <div class="notice">यूज़र आईडी: <b>${esc(login)}</b><br>पासवर्ड: <b>${esc(pin)}</b></div><small>यह पासवर्ड दोबारा नहीं दिखेगा।</small>` });
+    } catch (err) { show(errText(err), 'error'); } finally { setBusy(false); await loadMembers(); }
+  };
+  const setPin = (uid, label, requestId = null) => {
+    const pin = newPin();
+    return dialog({ title: `${label} — नया पासवर्ड`, ok: 'पासवर्ड बदलें',
+      html: `<label for="pinIn">नया पासवर्ड (6 अंक)</label><input id="pinIn" inputmode="numeric" maxlength="6" value="${pin}">
+        <small>बदलने के बाद यह पासवर्ड सदस्य को स्वयं बताएँ।</small>`,
+      onOk: async () => {
+        const p = $('pinIn').value.trim();
+        if (!PIN_RE.test(p)) { show('पासवर्ड ठीक 6 अंकों का हो।', 'error'); return false; }
+        try { const r = await adminCall({ action: 'set_password', user_id: uid, password: p, request_id: requestId });
+          show(`${label} का नया पासवर्ड: ${p} — सदस्य को बताएँ।` + (r?.warning ? ' ' + r.warning : ''), 'success'); }
+        catch (err) { show(errText(err), 'error'); }
+        await loadMembers(); return true;
+      } });
+  };
+  document.querySelectorAll('.pinBtn').forEach(b => b.onclick = () => setPin(b.dataset.u, byId.get(b.dataset.u)?.display_name || ''));
+  const { data: rq, error: rqErr } = await db.rpc('sk_admin_reset_requests');
+  $('resetList').innerHTML = rqErr ? esc(errText(rqErr)) : (rq || []).map(q => `<div class="item"><b>${esc(q.login)}</b>
+      ${q.member_name ? `→ ${esc(q.member_name)}${q.member_status !== 'active' ? ` <small>(${esc(q.member_status)})</small>` : ''}` : ' <small>(इस आईडी का कोई सदस्य नहीं)</small>'}
+      <small>${when(q.requested_at)}</small>${q.note ? `<div>${esc(q.note)}</div>` : ''}
+      <div class="row" style="margin-top:8px">${q.member_user && !q.member_is_admin ? `<button type="button" class="rsBtn" data-u="${esc(q.member_user)}" data-n="${esc(q.member_name)}" data-q="${q.id}">नया पासवर्ड रखें</button>` : ''}
+      <button type="button" class="secondary rdBtn" data-q="${q.id}">खारिज करें</button></div></div>`).join('') || 'कोई खुला अनुरोध नहीं।';
+  document.querySelectorAll('.rsBtn').forEach(b => b.onclick = () => setPin(b.dataset.u, b.dataset.n, Number(b.dataset.q)));
+  document.querySelectorAll('.rdBtn').forEach(b => b.onclick = () => call('sk_admin_close_reset', { p_id: Number(b.dataset.q), p_status: 'dismissed' }, 'अनुरोध खारिज।'));
+  const { data: au } = await db.from('sk_member_audit').select('member_id,action,at,note,new_data').order('at', { ascending: false }).limit(200);
+  const names = new Map(data.map(m => [m.user_id, m.display_name]));
+  const A = { added_by_admin: 'Admin ने बनाया', admin_bootstrap: 'Admin तय', requested: 'अनुरोध', approved: 'मंज़ूर', rejected: 'अस्वीकृत', rights_changed: 'अधिकार बदले', removed: 'पहुँच हटाई' };
+  $('memberAudit').innerHTML = (au || []).map(a => `${when(a.at)} — ${esc(names.get(a.member_id) || a.member_id)}: <b>${A[a.action] || esc(a.action)}</b>` +
+    (a.new_data ? ` (R:${a.new_data.can_read ? '✓' : '✗'} W:${a.new_data.can_write ? '✓' : '✗'} सुधार:${a.new_data.can_correct ? '✓' : '✗'})` : '') + (a.note ? ' · ' + esc(a.note) : '')).join('<br>');
+}
+
+// ---------- Admin: CSV और समापन
+function download(name, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+const stamp = () => todayIST();
+
+async function exportExpenses() {
+  setBusy(true);
+  try {
+    const { data, error } = await db.from('sk_expenses').select('*').order('ref_no').limit(10000);
+    if (error) throw error;
+    const csv = expensesCsv(data);
+    const { data: s, error: sErr } = await db.rpc('sk_summary', {});
+    if (sErr) throw sErr;
+    const screen = toPaise((s.find(x => x.kind === 'total') || { total: '0' }).total), fromCsv = csvActiveTotalPaise(csv);
+    const ok = screen === fromCsv;
+    $('reconcile').hidden = false; $('reconcile').className = 'notice ' + (ok ? 'success' : 'error');
+    $('reconcile').textContent = `${data.length} पंक्तियाँ। CSV का सक्रिय कुल ${rupee(fromCsv)} · database/स्क्रीन का सक्रिय कुल ${rupee(screen)} — ` +
+      (ok ? 'मिलान सही ✓' : 'मेल नहीं खाता! CSV साझा न करें, Admin जाँच करें।');
+    download(`surya-kunj-kharch-register-${stamp()}.csv`, csv);
+  } catch (e) { show('CSV नहीं बना: ' + errText(e), 'error'); } finally { setBusy(false); }
+}
+async function exportAudit() {
+  const { data, error } = await db.from('sk_expense_audit').select('*').order('id').limit(50000);
+  if (error) { show(errText(error), 'error'); return; }
+  download(`surya-kunj-badlav-record-${stamp()}.csv`, toCsv([['क्रम', 'खर्च id', 'रसीद id', 'कार्रवाई', 'करने वाला', 'समय', 'कारण', 'पुरानी जानकारी', 'नई जानकारी'],
+    ...data.map(a => [a.id, a.expense_id, a.receipt_id || '', a.action, a.actor_name || '', a.at, a.reason || '', JSON.stringify(a.old_data || ''), JSON.stringify(a.new_data || '')])]));
+}
+async function exportMembers() {
+  const { data, error } = await db.from('sk_member_audit').select('*').order('id').limit(50000);
+  if (error) { show(errText(error), 'error'); return; }
+  download(`surya-kunj-sadasya-record-${stamp()}.csv`, toCsv([['क्रम', 'सदस्य id', 'कार्रवाई', 'Admin/करने वाला id', 'समय', 'टिप्पणी', 'नई स्थिति'],
+    ...data.map(a => [a.id, a.member_id, a.action, a.actor || '', a.at, a.note || '', JSON.stringify(a.new_data || '')])]));
+}
+async function listAllReceipts() {
+  const { data, error } = await db.from('sk_receipts').select('expense_id,storage_path,original_filename,created_at').order('created_at');
+  if (error) { show(errText(error), 'error'); return; }
+  const refs = new Map(rows.map(r => [r.id, r.ref_no]));
+  const out = [];
+  for (const r of data) {
+    const { data: s } = await db.storage.from(BUCKET).createSignedUrl(r.storage_path, 300, { download: r.original_filename });
+    out.push(`<div>${refs.has(r.expense_id) ? ref(refs.get(r.expense_id)) + ' · ' : ''}${s ? `<a href="${esc(s.signedUrl)}" target="_blank" rel="noopener noreferrer">${esc(r.original_filename)}</a>` : esc(r.original_filename) + ' (link नहीं बना)'}</div>`);
+  }
+  $('receiptList').innerHTML = out.join('') || 'कोई रसीद नहीं।';
+}

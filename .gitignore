@@ -1,8 +1,7 @@
 node_modules/
 android/
 *.apk
-# सादा डेटा और बिल्ड स्क्रिप्ट कभी सार्वजनिक रिपो में नहीं
+# सादा (बिना एन्क्रिप्शन) हिसाब कभी सार्वजनिक रिपो में नहीं
 data.json
-build.py
-template.html
+**/data.json
 /index.html

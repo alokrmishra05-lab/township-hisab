@@ -275,6 +275,47 @@ with sync_playwright() as p:
     check('थीम बटन लॉगिन पेज पर भी', pg2.is_visible('#themeBtn'))
     check('थीम में JS त्रुटि नहीं', not errs and not errs2, str(errs + errs2))
 
+    # बहु-रिपोर्ट: पार्टी-वार, श्रेणी-वार, अवधि-विकल्प
+    pg, errs = open_as(p, 'admin')
+    check('रिपोर्ट विकल्प: प्रकार 3, अवधि 6, पार्टी और श्रेणी फ़िल्टर', pg.locator('#rpType option').count() == 3 and pg.locator('#rpPeriod option').count() == 6
+          and pg.locator('#rpPayer option').count() >= 4 and pg.locator('#rpCategory option').count() >= 15)
+    pg.evaluate("""() => { window.__pages = []; import('./js/report.js').then(m => { window.__rp = m; }); }"""); pg.wait_for_timeout(300)
+    html = pg.evaluate("""() => window.__rp.buildPages({type:'payer',details:true,from:'',to:'',label:'पूरी अवधि',by:'x',when:'y'},
+        [{kind:'all',invest:'0',spend:'3',total:'3'},{kind:'other',total:'0'}],
+        [{ref_no:1,expense_date:'2026-11-01',item:'सीमेंट',category:'निर्माण सामग्री',amount:'100.00',payer:'गगन आचारी',payment_method:'UPI',status:'active'},
+         {ref_no:2,expense_date:'2026-11-02',item:'बालू',category:'निर्माण सामग्री',amount:'50.00',payer:'आलोक रंजन मिश्र',payment_method:'नकद',status:'active'},
+         {ref_no:3,expense_date:'2026-11-03',item:'मजदूर',category:'मजदूरी',amount:'25.50',payer:'आलोक रंजन मिश्र',payment_method:'नकद',status:'active'}]).join('')""")
+    check('पार्टी-वार: समूह-शीर्षक, उप-योग, आलोक पहले', 'पार्टी-वार' in html and 'उप-योग: आलोक रंजन मिश्र' in html and '₹75.50' in html and html.index('आलोक रंजन मिश्र — 2 एंट्री') < html.index('गगन आचारी — 1 एंट्री'), html[:200])
+    html = pg.evaluate("""() => window.__rp.buildPages({type:'category',details:true,from:'2026-11-01',to:'2026-11-30',label:'इस महीने',category:'निर्माण सामग्री',by:'x',when:'y'},
+        [{kind:'all'},{kind:'other',total:'0'}],
+        [{ref_no:1,expense_date:'2026-11-01',item:'सीमेंट',category:'निर्माण सामग्री',amount:'100.00',payer:'गगन आचारी',payment_method:'UPI',status:'active'}]).join('')""")
+    check('श्रेणी-वार: शीर्षक, फ़िल्टर, अवधि, उप-योग, साझेदार-तालिका नहीं', 'श्रेणी / सामग्री-वार रिपोर्ट' in html and 'श्रेणी: <b>निर्माण सामग्री</b>' in html and 'इस महीने' in html and 'उप-योग: निर्माण सामग्री' in html and 'कुल हिसाब — साझेदार-वार' not in html)
+    pg.select_option('#rpType', 'payer'); pg.select_option('#rpPayer', 'गगन आचारी'); pg.select_option('#rpPeriod', 'full'); pg.check('#rpCancelled')
+    with pg.expect_download(timeout=60000) as dl:
+        pg.click('#rpMake')
+    d = dl.value; data = open(d.path(), 'rb').read(); open(f'{SHOTS}/party.pdf', 'wb').write(data)
+    check('पार्टी-वार PDF (गगन) डाउनलोड, नाम में party', data[:5] == b'%PDF-' and 'party' in d.suggested_filename and 'पार्टी-वार' in pg.inner_text('#rpStatus'), d.suggested_filename + ' ' + pg.inner_text('#rpStatus'))
+    check('फ़िल्टर का असर: केवल गगन की एंट्री', ' एंट्री)' in pg.inner_text('#rpStatus'), pg.inner_text('#rpStatus'))
+    pg.select_option('#rpType', 'category'); pg.select_option('#rpPayer', ''); pg.select_option('#rpPeriod', 'day')
+    pg.click('#rpMake'); pg.wait_for_timeout(2500)
+    check('"आज" की रिपोर्ट (कोई एंट्री नहीं) भी बनती है', '0 एंट्री' in pg.inner_text('#rpStatus'), pg.inner_text('#rpStatus'))
+    pg.select_option('#rpPeriod', 'custom'); pg.fill('#rpFrom', ''); pg.fill('#rpTo', ''); pg.click('#rpMake'); pg.wait_for_timeout(300)
+    check('कस्टम में तारीख खाली हो तो रोक', 'दोनों तारीख' in pg.inner_text('#message'))
+    check('बहु-रिपोर्ट में JS त्रुटि नहीं', not errs, str(errs))
+    # रसीद: कैमरा से फ़ोटो (बिना extension वाला नाम भी)
+    pg, errs = open_as(p, 'writer')
+    check('खर्च फ़ॉर्म में "कैमरा से फ़ोटो" (capture=environment)', pg.is_visible('label[for="fCamera"]') and pg.get_attribute('#fCamera', 'capture') == 'environment')
+    jpg = open(f'{SAMPLES}/bill.jpg', 'rb').read()
+    pg.set_input_files('#fCamera', files=[{'name': 'image', 'mimeType': 'image/jpeg', 'buffer': jpg}]); pg.wait_for_timeout(200)
+    pg.set_input_files('#fCamera', files=[{'name': 'IMG_2001.jpg', 'mimeType': 'image/jpeg', 'buffer': jpg}]); pg.wait_for_timeout(200)
+    check('कैमरा की 2 फ़ोटो सूची में', 'कैमरा से 2 फ़ोटो' in pg.inner_text('#camList'), pg.inner_text('#camList'))
+    pg.select_option('#fCategory', 'निर्माण सामग्री'); pg.select_option('#fMethod', index=1)
+    pg.fill('#fAmount', '640'); pg.fill('#fItem', 'कैमरा परीक्षण'); pg.fill('#fPayer', 'गगन आचारी'); pg.click('#addBtn'); pg.wait_for_timeout(800)
+    st = state_of(pg); names = [r['original_filename'] for r in st['sk_receipts']]
+    check('कैमरा की फ़ोटो रसीद बनकर जुड़ीं (बिना extension → camera-*.jpg)', any(n.startswith('camera-') and n.endswith('.jpg') for n in names) and 'IMG_2001.jpg' in names and '2 रसीद' in pg.inner_text('#message'), str(names) + pg.inner_text('#message'))
+    check('सहेजने के बाद कैमरा-सूची खाली', pg.inner_text('#camList').strip() == '')
+    check('कैमरा में JS त्रुटि नहीं', not errs, str(errs))
+
     # swipe से टैब बदलना
     pg, errs = open_as(p, 'admin')
     def swipe(sel, dx, dy=0):
@@ -309,13 +350,16 @@ with sync_playwright() as p:
     d = dl.value; path = d.path(); data = open(path, 'rb').read(); open(f'{SHOTS}/report.pdf', 'wb').write(data)
     import re as _re
     npages = len(_re.findall(rb'/Type\s*/Page[^s]', data))
-    check('PDF डाउनलोड: असली PDF, नाम सही, ≥2 पृष्ठ (सार + एंट्री)', data[:5] == b'%PDF-' and d.suggested_filename.startswith('surya-kunj-report-') and npages >= 2, f'{d.suggested_filename} pages={npages} size={len(data)}')
+    check('PDF डाउनलोड: असली PDF, नाम सही, ≥2 पृष्ठ (सार + एंट्री)', data[:5] == b'%PDF-' and d.suggested_filename.startswith('surya-kunj-hisab-report-') and npages >= 2, f'{d.suggested_filename} pages={npages} size={len(data)}')
     pg.wait_for_timeout(300)
-    check('PDF बनने के बाद संदेश और कोई अस्थायी पन्ना नहीं बचा', 'PDF तैयार' in pg.inner_text('#rpStatus') and pg.locator('.rp').count() == 0, pg.inner_text('#rpStatus'))
+    check('PDF बनने के बाद संदेश और कोई अस्थायी पन्ना नहीं बचा', 'तैयार' in pg.inner_text('#rpStatus') and pg.locator('.rp').count() == 0, pg.inner_text('#rpStatus'))
+    check('कस्टम तारीख-खाने केवल "कस्टम" अवधि पर', not pg.is_visible('#rpFrom'))
+    pg.select_option('#rpPeriod', 'custom')
+    check('कस्टम चुनते ही तारीख-खाने दिखे', pg.is_visible('#rpFrom') and pg.is_visible('#rpTo'))
     pg.fill('#rpFrom', '2026-12-01'); pg.fill('#rpTo', '2026-01-01'); pg.click('#rpMake'); pg.wait_for_timeout(300)
     check('उलटी तारीखों पर रोक', 'पहले' in pg.inner_text('#message'))
     pg.evaluate("window.Capacitor = { isNativePlatform: () => true }")
-    pg.click('#rpAll'); pg.click('#rpMake'); pg.wait_for_timeout(300)
+    pg.select_option('#rpPeriod', 'full'); pg.click('#rpMake'); pg.wait_for_timeout(300)
     check('APK के अंदर: "Chrome में खोलें" विकल्प (डाउनलोड नहीं)', pg.is_visible('#rpOpen') and 'Chrome' in pg.inner_text('#rpStatus'))
     check('रिपोर्ट में JS त्रुटि नहीं', not errs, str(errs))
     pg.click('#tabs button[data-t="register"]'); pg.wait_for_timeout(300)

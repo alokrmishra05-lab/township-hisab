@@ -1,7 +1,7 @@
 // सूर्य कुंज | निजी खर्च रजिस्टर — Supabase Auth + RLS + RPC + निजी storage
 // सारे अधिकार database में लागू हैं; यह UI केवल उन्हें आसान बनाता है।
 import { inspectFile, expectedMime, extOf } from './filecheck.js';
-import { makeReport, isNativeApp } from './report.js';
+import { makeReport, isNativeApp, periodRange, TYPES } from './report.js';
 import { ref, toPaise, paiseToText, rupee, toCsv, expensesCsv, csvActiveTotalPaise } from './money.js';
 
 const $ = id => document.getElementById(id);
@@ -113,6 +113,9 @@ function init() {
   $('openRef').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); openByRef($('openRef').value); } });
   enableSwipe();
   wireReport();
+  $('fCamera').onchange = () => { const f = $('fCamera').files[0]; $('fCamera').value = '';
+    if (!f) return; if (camShots.length >= 5) { show('एक बार में अधिकतम 5 रसीदें।', 'error'); return; }
+    camShots.push(cameraFile(f)); showCamShots(); };
   refresh().catch(e => show('सेवा से संपर्क नहीं हुआ: ' + errText(e), 'error'));
 }
 
@@ -186,8 +189,19 @@ async function refreshInner() {
 }
 
 // ---------- खर्च जोड़ना
-async function prepareFiles(list) {
-  const files = Array.from(list || []);
+// कैमरा की फ़ोटो का नाम कई बार बिना सही extension के आता है — type से नाम दें
+function cameraFile(f) {
+  const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[f.type];
+  if (/\.(jpe?g|png|webp)$/i.test(f.name) || !ext) return f;
+  return new File([f], `camera-${Date.now()}.${ext}`, { type: f.type, lastModified: f.lastModified });
+}
+let camShots = [];
+function showCamShots() {
+  $('camList').innerHTML = camShots.length ? `कैमरा से ${camShots.length} फ़ोटो: ` + camShots.map((f, i) => `${esc(f.name)} <button type="button" class="secondary camDel" data-i="${i}" style="padding:2px 8px">हटाएँ</button>`).join(' ') : '';
+  document.querySelectorAll('.camDel').forEach(b => b.onclick = () => { camShots.splice(Number(b.dataset.i), 1); showCamShots(); });
+}
+async function prepareFiles(list, extra = []) {
+  const files = [...Array.from(list || []), ...extra];
   if (files.length > 5) throw Error('एक बार में अधिकतम 5 रसीदें।');
   const out = [];
   for (const f of files) {
@@ -250,7 +264,7 @@ async function addExpense(e) {
     if (paise === null || paise <= 0n || paise > 10000000000n) throw Error('राशि सही भरें: जैसे 2450 या 2450.50 (अधिकतम ₹10 करोड़, दो दशमलव तक)।');
     const item = $('fItem').value.trim(), payer = $('fPayer').value.trim();
     if (!$('fCategory').value || !$('fMethod').value || item.length < 2 || payer.length < 2) throw Error('सभी * वाले खाने भरें।');
-    const files = await prepareFiles($('fReceipt').files);
+    const files = await prepareFiles($('fReceipt').files, camShots);
     setBusy(true);
     const { data, error } = await db.rpc('sk_add_expense', { p_date: d, p_item: item, p_category: $('fCategory').value,
       p_amount: paiseToText(paise), p_payer: payer, p_method: $('fMethod').value });
@@ -261,7 +275,7 @@ async function addExpense(e) {
       try { msg += ` ${await uploadReceipts(added.id, files)} रसीद जुड़ी।`; }
       catch (err) { show(`${msg}\nपर रसीद पूरी नहीं जुड़ी — ${err.message}\nखर्च सुरक्षित है; सुधार-अधिकार वाला सदस्य या Admin "रसीद जोड़ें" से बाद में जोड़ सकता है।`, 'error'); return; }
     }
-    $('addForm').reset(); $('fDate').value = todayIST();
+    $('addForm').reset(); $('fDate').value = todayIST(); camShots = []; showCamShots();
     $('addedList').insertAdjacentHTML('afterbegin', `<div>✓ ${esc(msg)}</div>`);
     show(msg, 'success');
   } catch (err) { show(errText(err), 'error'); } finally { setBusy(false); }
@@ -378,13 +392,18 @@ async function toggleHistory(id) {
 
 function addReceiptDialog(r, have) {
   if (!r) return;
+  const rcShots = [];
+  setTimeout(() => { const c = $('rcCamera'); if (c) c.onchange = () => { const f = c.files[0]; c.value = ''; if (!f) return;
+    rcShots.push(cameraFile(f)); $('rcCamList').textContent = `कैमरा से ${rcShots.length} फ़ोटो जुड़ने को तैयार`; }; }, 0);
   dialog({
     title: `रसीद जोड़ें: ${ref(r.ref_no)}`, ok: 'जोड़ें',
     html: `<p>इस खर्च में ${have}/5 रसीदें हैं; अधिकतम ${5 - have} और जुड़ सकती हैं। जुड़ने के बाद रसीद बदली/हटाई नहीं जा सकती और बदलाव-रिकॉर्ड में दर्ज होती है।</p>
+      <label for="rcCamera" class="btnlike secondary" style="margin-bottom:8px">📷 कैमरा से फ़ोटो</label><input id="rcCamera" type="file" accept="image/*" capture="environment" class="vh">
+      <div id="rcCamList" class="muted"></div>
       <input id="rcFiles" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">`,
     onOk: async () => {
       try {
-        const files = await prepareFiles($('rcFiles').files);
+        const files = await prepareFiles($('rcFiles').files, rcShots);
         if (!files.length) { $('rcFiles').focus(); return false; }
         if (have + files.length > 5) throw Error(`अधिकतम 5 रसीदें — अभी केवल ${5 - have} और जुड़ सकती हैं।`);
         const n = await uploadReceipts(r.id, files);
@@ -438,11 +457,15 @@ function cancelDialog(r) {
 
 // ---------- PDF रिपोर्ट
 function wireReport() {
-  $('rpAll').onclick = () => { $('rpFrom').value = ''; $('rpTo').value = ''; };
+  const sync = () => document.querySelectorAll('.rpCustom').forEach(d => d.hidden = $('rpPeriod').value !== 'custom');
+  $('rpPeriod').onchange = sync; sync();
+  $('rpCategory').innerHTML = '<option value="">सभी</option>' + CATEGORIES.map(c => `<option>${esc(c)}</option>`).join('');
+  $('rpPayer').innerHTML = '<option value="">सभी</option>' + [...document.querySelectorAll('#payers option')].map(o => `<option>${esc(o.value)}</option>`).join('');
   $('rpMake').onclick = async () => {
     if (busy) return;
-    const from = $('rpFrom').value, to = $('rpTo').value;
-    if (from && to && from > to) { show('"से" तारीख "तक" से पहले की हो।', 'error'); return; }
+    const per = periodRange($('rpPeriod').value, todayIST(), $('rpFrom').value, $('rpTo').value);
+    if ($('rpPeriod').value === 'custom' && (!per.from || !per.to)) { show('कस्टम अवधि में "से" और "तक" दोनों तारीख भरें।', 'error'); return; }
+    if (per.from && per.to && per.from > per.to) { show('"से" तारीख "तक" से पहले की हो।', 'error'); return; }
     if (isNativeApp()) {
       $('rpStatus').innerHTML = 'ऐप के अंदर फ़ाइल डाउनलोड नहीं होती। <b>Chrome में खोलें</b> दबाएँ, वहाँ लॉगिन करके यही बटन दबाएँ — PDF फ़ोन में सेव हो जाएगी।<br><button type="button" id="rpOpen" class="secondary" style="margin-top:8px">Chrome में खोलें</button>';
       $('rpOpen').onclick = () => window.open(location.origin + location.pathname, '_blank');
@@ -450,10 +473,11 @@ function wireReport() {
     }
     setBusy(true);
     try {
-      const r = await makeReport(db, { from, to, details: $('rpDetails').checked, cancelled: $('rpCancelled').checked,
+      const r = await makeReport(db, { ...per, type: $('rpType').value, payer: $('rpPayer').value, category: $('rpCategory').value,
+        details: $('rpDetails').checked, cancelled: $('rpCancelled').checked,
         by: me?.display_name || '', when: new Date().toLocaleString('hi-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) },
         t => { $('rpStatus').textContent = t; });
-      $('rpStatus').textContent = `PDF तैयार: ${r.name} (${r.pages} पृष्ठ, ${r.rows} एंट्री) — डाउनलोड फ़ोल्डर देखें।`;
+      $('rpStatus').textContent = `${TYPES[$('rpType').value]} तैयार: ${r.name} (${r.pages} पृष्ठ, ${r.rows} एंट्री) — डाउनलोड फ़ोल्डर देखें।`;
     } catch (err) { $('rpStatus').textContent = 'PDF नहीं बनी: ' + errText(err); }
     finally { setBusy(false); }
   };

@@ -75,6 +75,9 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
 .hdr-actions{display:flex;gap:8px;align-items:center}.theme-btn{padding:8px 12px;font-size:14px;white-space:nowrap}
+.vh{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+.btnlike{display:inline-flex;align-items:center;justify-content:center;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:var(--brand-soft);color:var(--ink);font-weight:600;cursor:pointer}
+.btnlike:focus-within{outline:2px solid var(--brand)}
 </style>
 </head>
 <body>
@@ -122,14 +125,22 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   <section id="reportCard" class="card" hidden>
     <h2>PDF रिपोर्ट</h2>
     <div class="grid">
-      <div><label for="rpFrom">से (तारीख)</label><input id="rpFrom" type="date"></div>
-      <div><label for="rpTo">तक (तारीख)</label><input id="rpTo" type="date"></div>
+      <div><label for="rpType">रिपोर्ट का प्रकार</label><select id="rpType">
+        <option value="general">सामान्य — कुल हिसाब + सार</option>
+        <option value="payer">पार्टी-वार (भुगतानकर्ता)</option>
+        <option value="category">श्रेणी / सामग्री-वार</option></select></div>
+      <div><label for="rpPeriod">अवधि</label><select id="rpPeriod">
+        <option value="day">आज</option><option value="week">इस हफ़्ते</option><option value="month">इस महीने</option>
+        <option value="lastmonth">पिछला महीना</option><option value="full" selected>पूरी अवधि</option><option value="custom">कस्टम (तारीख चुनें)</option></select></div>
+      <div class="rpCustom" hidden><label for="rpFrom">से (तारीख)</label><input id="rpFrom" type="date"></div>
+      <div class="rpCustom" hidden><label for="rpTo">तक (तारीख)</label><input id="rpTo" type="date"></div>
+      <div><label for="rpPayer">भुगतानकर्ता (पार्टी)</label><select id="rpPayer"><option value="">सभी</option></select></div>
+      <div><label for="rpCategory">श्रेणी / सामग्री</label><select id="rpCategory"><option value="">सभी</option></select></div>
     </div>
     <label class="row" style="margin-top:10px;gap:8px;align-items:center"><input id="rpDetails" type="checkbox" checked> हर एंट्री की सूची भी</label>
     <label class="row" style="gap:8px;align-items:center"><input id="rpCancelled" type="checkbox"> रद्द एंट्री भी (कटी हुई दिखेंगी)</label>
-    <div class="row" style="margin-top:10px"><button id="rpMake" type="button">PDF बनाएँ और डाउनलोड करें</button>
-      <button id="rpAll" type="button" class="secondary">पूरी अवधि</button></div>
-    <small id="rpStatus" class="muted">तारीख खाली छोड़ें तो शुरू से आज तक की रिपोर्ट बनेगी। रिपोर्ट इसी फ़ोन/कंप्यूटर में बनती है।</small>
+    <button id="rpMake" type="button" style="margin-top:10px;width:100%">PDF बनाएँ और डाउनलोड करें</button>
+    <small id="rpStatus" class="muted">प्रकार, अवधि और फ़िल्टर बदलकर जितनी चाहें उतनी रिपोर्ट बनाएँ। रिपोर्ट इसी फ़ोन/कंप्यूटर में बनती है।</small>
   </section>
 
   <section id="v-add" class="card" hidden>
@@ -144,6 +155,9 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
       <label for="fItem">मद (किस चीज़/काम पर) *</label><input id="fItem" maxlength="200" required placeholder="जैसे: सीमेंट 50 बोरी">
       <label for="fPayer">भुगतानकर्ता (किसने पैसा दिया) *</label><input id="fPayer" maxlength="100" list="payers" required>
       <label for="fReceipt">रसीद (वैकल्पिक) — JPG, PNG, WEBP, PDF, DOCX</label>
+      <div class="row" style="gap:8px"><label for="fCamera" class="btnlike secondary">📷 कैमरा से फ़ोटो</label>
+        <input id="fCamera" type="file" accept="image/*" capture="environment" class="vh"></div>
+      <div id="camList" class="muted"></div>
       <input id="fReceipt" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
       <small>अधिकतम 5 फ़ाइलें, हर एक 10 MB तक। रसीदें निजी रहती हैं और जुड़ने के बाद बदली/हटाई नहीं जा सकतीं।</small>
       <button id="addBtn" type="submit" style="margin-top:16px;width:100%">खर्च सहेजें</button>

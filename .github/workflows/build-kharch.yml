@@ -42,12 +42,22 @@ jobs:
             done
           done
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher*.xml
-      - name: APK बनाएँ
+      - name: APK बनाएँ (पक्की चाबी से हस्ताक्षर, ताकि नया APK पुराने के ऊपर install हो)
+        env:
+          KS_B64: ${{ secrets.KHARCH_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.KHARCH_KEYSTORE_PASS }}
         run: |
+          if [ -z "$KS_B64" ] || [ -z "$KS_PASS" ]; then echo "KHARCH_KEYSTORE_B64 / KHARCH_KEYSTORE_PASS secret नहीं मिले — रुक रहे हैं"; exit 1; fi
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk ../surya-kunj-kharch.apk
+          ./gradlew assembleRelease --no-daemon
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/kharch.p12"
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          "$BT/zipalign" -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/kharch.p12" --ks-type PKCS12 --ks-key-alias kharch \
+            --ks-pass env:KS_PASS --key-pass env:KS_PASS --out ../surya-kunj-kharch.apk "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" verify --print-certs ../surya-kunj-kharch.apk | grep -i "SHA-256" | head -1
+          rm -f "$RUNNER_TEMP/kharch.p12"
       - name: रिलीज़ में डालें
         env:
           GH_TOKEN: ${{ github.token }}

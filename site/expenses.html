@@ -37,6 +37,7 @@ button{font:inherit;font-weight:600;font-size:15px;background:var(--brand);borde
 :root[data-theme=dark] button{color:#0b1a10}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]) button{color:#0b1a10}}
 button:disabled{opacity:.55;cursor:wait}
+button.wa{background:#1b8a4a;margin-top:12px;width:100%}button.wa.small{width:auto;margin:6px 0 0;min-height:36px;padding:6px 12px;font-size:14px}
 .secondary{background:var(--brand-soft);color:var(--brand)!important}
 .danger{background:#b42318;color:#fff!important}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.row>*{flex:1;min-width:130px}
@@ -121,6 +122,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   <section id="v-hisab" class="card" hidden>
     <h2>कुल हिसाब — साझेदार-वार</h2>
     <div id="hisabBox" class="muted"></div>
+    <button type="button" id="waHisab" class="wa" hidden>WhatsApp पर भेजें</button>
   </section>
   <section id="reportCard" class="card" hidden>
     <h2>PDF रिपोर्ट</h2>

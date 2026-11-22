@@ -135,6 +135,12 @@ with sync_playwright() as p:
     add = [c for c in calls if c[1] == 'sk_add_expense']; up = [c for c in calls if c[0] == 'upload']
     check('Write: खर्च जुड़ा, राशि text "1500.50"', add and add[0][2]['p_amount'] == '1500.50' and 'सहेजा गया' in pg.inner_text('#message'), pg.inner_text('#message')[:100])
     check('Android: खाली MIME वाली DOCX सही MIME से अपलोड, path <user>/<खर्च>/<uuid>.docx', up and up[0][2].endswith('wordprocessingml.document') and re.match(r'^u-writer/n\d+/[0-9a-f-]{36}\.docx$', up[0][1]), str(up))
+    pg.evaluate("window.__wa=[];HTMLAnchorElement.prototype.click=function(){if(this&&this.href)window.__wa.push([String(this.href),String(this.target),String(this.rel)])}")
+    pg.click('#addedList .waNew'); wa = pg.evaluate('window.__wa')
+    from urllib.parse import unquote
+    wt = unquote(wa[0][0].split('text=', 1)[1]) if wa else ''
+    check('नई एंट्री: "WhatsApp पर भेजें" → wa.me, नया टैब, noopener', wa and wa[0][0].startswith('https://wa.me/?text=') and wa[0][1] == '_blank' and 'noopener' in wa[0][2], str(wa))
+    check('नई एंट्री संदेश: क्रमांक, तारीख DD-MM-YYYY, सामान, राशि, भुगतानकर्ता, तरीका, श्रेणी, रसीद', all(w in wt for w in ['SK-', '12-11-2026', 'JCB 1 घंटा', '₹1,500.50', 'साइट कैश', 'नकद', 'मशीन / वाहन', 'रसीद: 1', '/expenses']), wt)
     rs = [c for c in calls if c[1] == 'sk_reserve_receipt_slot']
     check('अपलोड से पहले server पर जगह आरक्षित; upload उसी आरक्षित path पर', rs and rs[0][2]['p_ext'] == 'docx' and up and up[0][1].startswith('u-writer/'), str(rs))
     # upload विफल → जगह तुरंत वापस
@@ -254,6 +260,18 @@ with sync_playwright() as p:
     check('ऊपर "मुख्य हिसाब" link नहीं, ब्रांड "सूर्य कुंज" और शीर्षक "हिसाब-किताब"', pg.locator('header a').count() == 0 and 'सूर्य कुंज' in pg.inner_text('header') and pg.inner_text('h1') == 'हिसाब-किताब')
     check('लोड होने के बाद "खुल रहा है…" छिपा', not pg.is_visible('#boot'))
     check('कुल हिसाब में साझेदार क्रम: आलोक, अमरनाथ, गगन', hb.index('आलोक रंजन मिश्र') < hb.index('अमरनाथ पाण्डेय') < hb.index('गगन आचारी'))
+    check('कुल हिसाब: "WhatsApp पर भेजें" बटन दिखता है', pg.is_visible('#waHisab'))
+    pg.evaluate("window.__wa=[];HTMLAnchorElement.prototype.click=function(){if(this&&this.href)window.__wa.push([String(this.href),String(this.target),String(this.rel)])}")
+    pg.click('#waHisab'); wa = pg.evaluate('window.__wa')
+    wt = unquote(wa[0][0].split('text=', 1)[1]) if wa else ''
+    check('हिसाब संदेश: शीर्षक, कुल, तीनों साझेदार ±, लेना/देना, लिंक; अन्य (रद्द) नहीं', all(w in wt for w in ['कुल हिसाब', 'कुल (साझेदारों से): ₹22,735.31', 'आलोक रंजन मिश्र: −₹7,578.44 (देना है)', '+₹13,922.31 (लेना है)', 'गगन आचारी', '/expenses']) and 'अन्य भुगतानकर्ता' not in wt, wt[-300:])
+    check('हिसाब संदेश में HTML नहीं', '<' not in wt, wt[:200])
+    pg.click('#tabs button[data-t="register"]'); pg.wait_for_timeout(500)
+    check('रजिस्टर: सक्रिय एंट्री पर WhatsApp बटन, रद्द पर नहीं', pg.locator('.item.active .waBtn').count() >= 1 and pg.locator('.item.cancelled .waBtn').count() == 0)
+    pg.evaluate("window.__wa=[];HTMLAnchorElement.prototype.click=function(){if(this&&this.href)window.__wa.push([String(this.href),String(this.target),String(this.rel)])}")
+    pg.locator('.item.active .waBtn').first.click(); wa = pg.evaluate('window.__wa')
+    check('रजिस्टर एंट्री → wa.me संदेश में क्रमांक और राशि', wa and 'SK-' in unquote(wa[0][0]) and '₹' in unquote(wa[0][0]), str(wa)[:200])
+    pg.click('#tabs button[data-t="hisab"]'); pg.wait_for_timeout(400)
     pg.screenshot(path=f'{SHOTS}/7_hisab.png', full_page=True)
     check('कुल हिसाब में JS त्रुटि नहीं', not errs, str(errs))
     pg, errs = open_as(p, 'writer')

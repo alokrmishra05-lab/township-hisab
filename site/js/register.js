@@ -2,6 +2,7 @@
 // सारे अधिकार database में लागू हैं; यह UI केवल उन्हें आसान बनाता है।
 import { inspectFile, expectedMime, extOf } from './filecheck.js';
 import { makeReport, isNativeApp, periodRange, TYPES } from './report.js';
+import { hisabText, entryText, openWhatsApp } from './share.js';
 import { ref, toPaise, paiseToText, rupee, toCsv, expensesCsv, csvActiveTotalPaise } from './money.js';
 
 const $ = id => document.getElementById(id);
@@ -275,8 +276,11 @@ async function addExpense(e) {
       try { msg += ` ${await uploadReceipts(added.id, files)} रसीद जुड़ी।`; }
       catch (err) { show(`${msg}\nपर रसीद पूरी नहीं जुड़ी — ${err.message}\nखर्च सुरक्षित है; सुधार-अधिकार वाला सदस्य या Admin "रसीद जोड़ें" से बाद में जोड़ सकता है।`, 'error'); return; }
     }
+    const shareTxt = entryText({ ref_no: added.ref_no, expense_date: d, item, category: $('fCategory').value, amount: paise,
+      payer, payment_method: $('fMethod').value, status: 'active', created_by_name: me.display_name }, files.length, siteLink());
     $('addForm').reset(); $('fDate').value = todayIST(); camShots = []; showCamShots();
-    $('addedList').insertAdjacentHTML('afterbegin', `<div>✓ ${esc(msg)}</div>`);
+    $('addedList').insertAdjacentHTML('afterbegin', `<div>✓ ${esc(msg)}<br><button type="button" class="wa small waNew">यह एंट्री WhatsApp पर भेजें</button></div>`);
+    $('addedList').querySelector('.waNew').onclick = () => openWhatsApp(shareTxt);
     show(msg, 'success');
   } catch (err) { show(errText(err), 'error'); } finally { setBusy(false); }
 }
@@ -300,6 +304,7 @@ function card(r, recs, canCorrect, histHtml = null) {
       ${canCorrect && r.status === 'active' ? `<button type="button" class="secondary fixBtn" data-id="${esc(r.id)}">सुधारें</button>
         <button type="button" class="secondary cancelBtn" data-id="${esc(r.id)}">रद्द करें</button>
         ${slots > 0 ? `<button type="button" class="secondary addRcBtn" data-id="${esc(r.id)}" data-n="${recs.length}">रसीद जोड़ें (${recs.length}/5)</button>` : '<small>5/5 रसीदें — सीमा पूरी</small>'}` : ''}
+      ${r.status === 'active' ? `<button type="button" class="wa small waBtn" data-id="${esc(r.id)}" style="flex:0 0 auto">WhatsApp</button>` : ''}
       ${histHtml === null ? `<button type="button" class="secondary histBtn" data-id="${esc(r.id)}" style="flex:0 0 auto">इतिहास</button>` : ''}
     </div><div class="audit" id="au-${esc(r.id)}"${histHtml === null ? ' hidden' : ''}>${histHtml ?? ''}</div></div>`;
 }
@@ -310,7 +315,9 @@ function bindCards(list) {
   document.querySelectorAll('.cancelBtn').forEach(b => b.onclick = () => cancelDialog(find(b.dataset.id)));
   document.querySelectorAll('.histBtn').forEach(b => b.onclick = () => toggleHistory(b.dataset.id));
   document.querySelectorAll('.addRcBtn').forEach(b => b.onclick = () => addReceiptDialog(find(b.dataset.id), Number(b.dataset.n)));
+  document.querySelectorAll('.waBtn').forEach(b => b.onclick = () => { const r = find(b.dataset.id); if (r) openWhatsApp(entryText(r, (receiptsByExp.get(r.id) || []).length, siteLink())); });
 }
+const siteLink = () => location.origin + '/expenses';
 const canRead = () => me.is_admin || me.can_read;
 const canCorrect = () => me.is_admin || me.can_correct;
 
@@ -485,7 +492,7 @@ function wireReport() {
 
 // ---------- कुल हिसाब: साझेदार-वार निवेश + खर्च, तय हिस्सा और अंतर (database में गणना)
 async function loadHisab() {
-  $('hisabBox').textContent = 'लोड हो रहा है…';
+  $('hisabBox').textContent = 'लोड हो रहा है…'; $('waHisab').hidden = true;
   const { data, error } = await db.rpc('sk_partner_summary');
   if (error) { $('hisabBox').textContent = errText(error); return; }
   const P = v => { const t = String(v ?? '0').trim(), neg = t.startsWith('-'); const p = toPaise(neg ? t.slice(1) : t) ?? 0n; return neg ? -p : p; };
@@ -501,6 +508,9 @@ async function loadHisab() {
       <tr><td>अंतर</td><td>${sign(x.diff)}</td></tr></table></div>`).join('')}
     ${P(other?.total) > 0n ? `<div class="notice">अन्य भुगतानकर्ता (जैसे साइट कैश): ${rupee(P(other.total))} · ${other.entries} एंट्री — यह साझेदारों के हिस्से में नहीं जुड़ा।</div>` : ''}
     <small>"भूमि खरीद" श्रेणी = निवेश, बाकी = खर्च। केवल सक्रिय (रद्द नहीं) एंट्री गिनी जाती हैं। "अंतर" = साझेदार का कुल योगदान − कुल राशि में उसका तय हिस्सा; + वाले को बाकी साझेदारों से लेना है, − वाले को देना है।</small>`;
+  const shareTxt = hisabText({ asOf: todayIST(), total: P(all?.total), invest: P(all?.invest), spend: P(all?.spend),
+    partners: partners.map(x => ({ name: x.name, diff: P(x.diff) })), other: { total: P(other?.total), entries: other?.entries ?? 0 }, link: siteLink() });
+  $('waHisab').hidden = false; $('waHisab').onclick = () => openWhatsApp(shareTxt);
 }
 
 // ---------- Admin: सदस्य
